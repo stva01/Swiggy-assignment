@@ -1,5 +1,6 @@
 {
-  "buildCommand": "cd dev && pnpm install && pnpm run build",
+  "installCommand": "npx pnpm@10.4.1 install --prefix dev --no-frozen-lockfile",
+  "buildCommand": "npx pnpm@10.4.1 --prefix dev run build",
   "outputDirectory": "dev/dist/public",
   "rewrites": [
     {
