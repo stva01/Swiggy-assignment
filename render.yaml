@@ -26,8 +26,9 @@ services:
     buildCommand: pnpm install && pnpm run build
     startCommand: node dist/index.js
     envVars:
+      - key: BACKEND_URL
+        value: https://post-offer-backend.onrender.com
       - key: VITE_API_URL
-        fromService:
-          type: web
-          name: post-offer-backend
-          property: host
+        value: https://post-offer-backend.onrender.com
+      - key: VITE_API_BASE_URL
+        value: https://post-offer-backend.onrender.com

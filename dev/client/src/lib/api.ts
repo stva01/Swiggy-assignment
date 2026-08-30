@@ -40,7 +40,13 @@ export type GenerateMessageResponse = {
   requestId?: string;
 };
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_URL ||
+  (typeof window !== "undefined" && window.location.hostname.includes("onrender.com")
+    ? "https://post-offer-backend.onrender.com"
+    : "")
+).replace(/\/$/, "");
 
 export async function requestGeneratedMessage(payload: GenerateMessageRequest): Promise<GenerateMessageResponse> {
   const response = await fetch(`${API_BASE_URL}/api/v1/ai/messages/generate`, {
