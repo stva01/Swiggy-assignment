@@ -104,6 +104,24 @@ temp/
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Office / Temporary
+~$*
+.manus-logs/
 
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/

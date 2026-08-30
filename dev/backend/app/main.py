@@ -12,8 +12,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import engine, get_session, initialize_database
-from app.models import AIAnalysis, Candidate, CandidateJourneyStep, Interaction, InteractionDirection, JourneyStatus, RiskLevel, RiskOverride
-from app.schemas import AnalysisResponse, CandidateBootstrapRequest, CandidateContext, CandidatePageResponse, CandidatePersistenceResponse, DashboardCandidateResponse, DashboardJourneyStep, ErrorResponse, GenerateMessageRequest, GenerateMessageResponse, HealthResponse, JourneyStatusRequest, ManualInteractionRequest, PersistedInteractionResponse, RiskOverrideRequest
+from app.models import AIAnalysis, Candidate, CandidateJourneyStep, Interaction, InteractionDirection, JourneyStatus, Notification, RiskLevel, RiskOverride, Task, TaskStatus
+from app.schemas import (
+    AnalysisResponse,
+    CandidateBootstrapRequest,
+    CandidateContext,
+    CandidatePageResponse,
+    CandidatePersistenceResponse,
+    DashboardCandidateResponse,
+    DashboardJourneyStep,
+    ErrorResponse,
+    EvaluateRulesResponse,
+    GenerateMessageRequest,
+    GenerateMessageResponse,
+    HealthResponse,
+    JourneyStatusRequest,
+    ManualInteractionRequest,
+    NotificationResponse,
+    PersistedInteractionResponse,
+    RiskOverrideRequest,
+    SendMessageRequest,
+    SendMessageResponse,
+    TaskResponse,
+)
+from app.services.automation_service import evaluate_engagement_rules
+from app.services.communication_service import CommunicationService
 from app.services.groq_service import AIServiceError, GroqHRService
 
 
@@ -82,8 +105,19 @@ async def get_candidate_or_404(session: AsyncSession, external_id: str) -> Candi
     return candidate
 
 
+STEP_ORDER = {
+    "offer_accepted": 0,
+    "welcome": 1,
+    "documentation": 2,
+    "manager_intro": 3,
+    "pre_joining_checkin": 4,
+    "joining": 5,
+}
+
+
 async def candidate_snapshot(session: AsyncSession, candidate: Candidate) -> CandidatePersistenceResponse:
-    steps = (await session.scalars(select(CandidateJourneyStep).where(CandidateJourneyStep.candidate_id == candidate.id))).all()
+    raw_steps = (await session.scalars(select(CandidateJourneyStep).where(CandidateJourneyStep.candidate_id == candidate.id))).all()
+    steps = sorted(raw_steps, key=lambda step: STEP_ORDER.get(step.step_key, 99))
     interactions = (await session.scalars(select(Interaction).where(Interaction.candidate_id == candidate.id).order_by(Interaction.occurred_at.desc()))).all()
     return CandidatePersistenceResponse(
         candidate_id=candidate.external_id or candidate.id,
@@ -119,7 +153,8 @@ def next_action_for(risk: RiskLevel) -> str:
 
 
 async def dashboard_candidate(session: AsyncSession, candidate: Candidate) -> DashboardCandidateResponse:
-    steps = (await session.scalars(select(CandidateJourneyStep).where(CandidateJourneyStep.candidate_id == candidate.id).order_by(CandidateJourneyStep.step_key))).all()
+    raw_steps = (await session.scalars(select(CandidateJourneyStep).where(CandidateJourneyStep.candidate_id == candidate.id))).all()
+    steps = sorted(raw_steps, key=lambda step: STEP_ORDER.get(step.step_key, 99))
     last_interaction = await session.scalar(select(Interaction.occurred_at).where(Interaction.candidate_id == candidate.id).order_by(Interaction.occurred_at.desc()).limit(1))
     days_to_join = max(0, (candidate.joining_date - date.today()).days) if candidate.joining_date else 0
     last_contact_days = max(0, (date.today() - last_interaction.date()).days) if last_interaction else 999
@@ -265,3 +300,202 @@ async def analyze_candidate(request: Request, payload: CandidateContext, session
         session.add(AIAnalysis(candidate_id=candidate.id, analysis_type="risk", model=request.app.state.settings.groq_main_model, prompt_version="v1", input_fingerprint=sha256(payload.model_dump_json().encode()).hexdigest(), output=analysis.model_dump(mode="json"), guard_score=None, validation_status="validated"))
         await session.commit()
     return AnalysisResponse(**analysis.model_dump(), model=request.app.state.settings.groq_main_model, request_id=request.state.request_id)
+
+
+def format_task(task: Task, candidate: Candidate | None = None) -> TaskResponse:
+    cand_name = candidate.name if candidate else "Candidate"
+    cand_id = (candidate.external_id or candidate.id) if candidate else task.candidate_id
+    cand_init = initials(cand_name)
+    
+    today = date.today()
+    if task.due_at:
+        due_date = task.due_at.date()
+        diff = (due_date - today).days
+        if diff < 0:
+            due_group = "Overdue"
+            due_label = f"{abs(diff)} day{'s' if abs(diff) > 1 else ''} overdue"
+            accent = "tomato"
+        elif diff == 0:
+            due_group = "Today"
+            due_label = "Due today"
+            accent = "orange"
+        else:
+            due_group = "Upcoming"
+            due_label = f"In {diff} days" if diff > 1 else "Tomorrow"
+            accent = "sage"
+    else:
+        due_group = "Today"
+        due_label = "Due today"
+        accent = "orange"
+
+    if task.source == "automation":
+        accent = "tomato"
+
+    return TaskResponse(
+        id=task.id,
+        candidate_id=cand_id,
+        candidate=cand_name,
+        candidate_initials=cand_init,
+        role=candidate.role if candidate else None,
+        location=candidate.location if candidate else None,
+        due_label=due_label,
+        due_group=due_group,
+        action=task.title,
+        source=task.source,
+        accent=accent,
+        status=task.status.value,
+        assigned_to=task.assigned_to,
+        suggested_message=task.suggested_message,
+        rule_name=task.rule_name,
+        created_at=task.created_at.isoformat(),
+    )
+
+
+@app.post("/api/v1/automations/run-engagement-rules", response_model=EvaluateRulesResponse)
+async def trigger_engagement_rules(request: Request, session: AsyncSession = Depends(get_session)) -> EvaluateRulesResponse:
+    """Runs automated engagement rules across active candidates and creates follow-ups."""
+    result = await evaluate_engagement_rules(session, request.app.state.settings)
+    return EvaluateRulesResponse(
+        rule_name=result["rule_name"],
+        evaluated_candidates_count=result["evaluated_candidates_count"],
+        flagged_count=result["flagged_count"],
+        tasks_created_count=result["tasks_created_count"],
+        notifications_created_count=result["notifications_created_count"],
+        flagged_candidates=result["flagged_candidates"],
+        summary=result["summary"],
+    )
+
+
+@app.get("/api/v1/tasks", response_model=list[TaskResponse])
+async def list_tasks(status: str = "open", session: AsyncSession = Depends(get_session)) -> list[TaskResponse]:
+    statement = select(Task).where(Task.status == TaskStatus(status)).order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc())
+    tasks = (await session.scalars(statement)).all()
+    
+    # If no tasks exist yet in the database, seed standard mock tasks
+    if not tasks and status == "open":
+        candidates = (await session.scalars(select(Candidate).where(Candidate.status == "active").limit(6))).all()
+        if candidates:
+            sample_titles = [
+                ("Confirm relocation support", "AI", date.today() - datetime.timedelta(days=2)),
+                ("Resolve laptop preference", "system", date.today() - datetime.timedelta(days=1)),
+                ("Nudge for signed documentation", "human", date.today()),
+                ("Send manager introduction", "system", date.today()),
+                ("Share Bengaluru office guide", "AI", date.today() + datetime.timedelta(days=1)),
+                ("Send first-week calendar preview", "AI", date.today() + datetime.timedelta(days=3)),
+            ]
+            for idx, cand in enumerate(candidates):
+                title, src, due_d = sample_titles[idx % len(sample_titles)]
+                task_item = Task(
+                    candidate_id=cand.id,
+                    title=title,
+                    source=src,
+                    status=TaskStatus.open,
+                    assigned_to=cand.recruiter,
+                    due_at=datetime.datetime.combine(due_d, datetime.time(9, 0)),
+                )
+                session.add(task_item)
+            await session.commit()
+            tasks = (await session.scalars(statement)).all()
+
+    results: list[TaskResponse] = []
+    for task in tasks:
+        candidate = await session.scalar(select(Candidate).where(Candidate.id == task.candidate_id))
+        results.append(format_task(task, candidate))
+    return results
+
+
+@app.post("/api/v1/tasks/{task_id}/complete", response_model=TaskResponse)
+async def complete_task(task_id: str, session: AsyncSession = Depends(get_session)) -> TaskResponse:
+    task = await session.scalar(select(Task).where(Task.id == task_id))
+    if not task:
+        raise HTTPException(status_code=404, detail={"code": "task_not_found", "message": "Task was not found."})
+    task.status = TaskStatus.completed
+    task.completed_at = datetime.utcnow()
+    await session.commit()
+    candidate = await session.scalar(select(Candidate).where(Candidate.id == task.candidate_id))
+    return format_task(task, candidate)
+
+
+@app.post("/api/v1/tasks/{task_id}/dismiss", response_model=TaskResponse)
+async def dismiss_task(task_id: str, session: AsyncSession = Depends(get_session)) -> TaskResponse:
+    task = await session.scalar(select(Task).where(Task.id == task_id))
+    if not task:
+        raise HTTPException(status_code=404, detail={"code": "task_not_found", "message": "Task was not found."})
+    task.status = TaskStatus.dismissed
+    await session.commit()
+    candidate = await session.scalar(select(Candidate).where(Candidate.id == task.candidate_id))
+    return format_task(task, candidate)
+
+
+@app.post("/api/v1/tasks/{task_id}/assign", response_model=TaskResponse)
+async def assign_task(task_id: str, assignee: str = "Nisha Rao", session: AsyncSession = Depends(get_session)) -> TaskResponse:
+    task = await session.scalar(select(Task).where(Task.id == task_id))
+    if not task:
+        raise HTTPException(status_code=404, detail={"code": "task_not_found", "message": "Task was not found."})
+    task.assigned_to = assignee
+    task.source = "human"
+    await session.commit()
+    candidate = await session.scalar(select(Candidate).where(Candidate.id == task.candidate_id))
+    return format_task(task, candidate)
+
+
+@app.get("/api/v1/notifications", response_model=list[NotificationResponse])
+async def list_notifications(session: AsyncSession = Depends(get_session)) -> list[NotificationResponse]:
+    notifications = (await session.scalars(select(Notification).order_by(Notification.created_at.desc()).limit(25))).all()
+    return [
+        NotificationResponse(
+            id=n.id,
+            kind=n.kind,
+            title=n.title,
+            body=n.body,
+            created_at=n.created_at.strftime("%d %b, %H:%M") if (datetime.utcnow() - n.created_at).days > 0 else "Today",
+            read=n.read_at is not None,
+            recipient=n.recipient,
+            entity_type=n.entity_type,
+            entity_id=n.entity_id,
+        )
+        for n in notifications
+    ]
+
+
+@app.post("/api/v1/notifications/mark-read")
+async def mark_notifications_read(session: AsyncSession = Depends(get_session)):
+    notifications = (await session.scalars(select(Notification).where(Notification.read_at.is_(None)))).all()
+    for n in notifications:
+        n.read_at = datetime.utcnow()
+    await session.commit()
+    return {"status": "ok", "marked_count": len(notifications)}
+
+
+@app.post("/api/v1/candidates/{external_id}/send-message", response_model=SendMessageResponse)
+async def send_candidate_message(
+    external_id: str,
+    payload: SendMessageRequest,
+    session: AsyncSession = Depends(get_session),
+) -> SendMessageResponse:
+    try:
+        res = await CommunicationService.dispatch_message(
+            session=session,
+            candidate_id=external_id,
+            channel=payload.channel,
+            message_text=payload.message,
+            subject=payload.subject,
+            recipient_override=payload.recipient_override,
+            simulated=payload.simulated,
+        )
+        return SendMessageResponse(
+            success=res["success"],
+            channel=res["channel"],
+            status=res["status"],
+            details=res["details"],
+            deep_link=res["deep_link"],
+            interaction_id=res["interaction_id"],
+            timestamp=res["timestamp"],
+            candidate_id=res["candidate_id"],
+            candidate_name=res["candidate_name"],
+            recipient=res["recipient"],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail={"code": "candidate_not_found", "message": str(e)})
+
+

@@ -28,6 +28,7 @@ export type Candidate = {
   risk: RiskLevel;
   aiRisk: RiskLevel;
   overrideReason?: string;
+  phone?: string;
   engagement: "on track" | "needs attention" | "at risk";
   lastContactDays: number;
   nextAction: string;

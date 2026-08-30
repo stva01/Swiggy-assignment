@@ -152,6 +152,8 @@ class Task(Base):
     status: Mapped[TaskStatus] = mapped_column(default=TaskStatus.open, index=True)
     assigned_to: Mapped[str | None] = mapped_column(String(120), index=True)
     due_at: Mapped[datetime | None] = mapped_column(DateTime)
+    suggested_message: Mapped[str | None] = mapped_column(Text)
+    rule_name: Mapped[str | None] = mapped_column(String(120))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime)
 

@@ -201,3 +201,82 @@ class CandidatePageResponse(BaseModel):
     page: int
     page_size: int = Field(serialization_alias="pageSize")
     total_pages: int = Field(serialization_alias="totalPages")
+
+
+class TaskResponse(BaseModel):
+    id: str
+    candidate_id: str = Field(serialization_alias="candidateId")
+    candidate: str
+    candidate_initials: str = Field(serialization_alias="candidateInitials")
+    role: str | None = None
+    location: str | None = None
+    due_label: str = Field(serialization_alias="dueLabel")
+    due_group: str = Field(serialization_alias="dueGroup")  # "Overdue" | "Today" | "Upcoming"
+    action: str
+    source: str  # "system" | "AI" | "human" | "automation"
+    accent: str  # "tomato" | "orange" | "sage"
+    status: str  # "open" | "completed" | "dismissed"
+    assigned_to: str | None = Field(default=None, serialization_alias="assignedTo")
+    suggested_message: str | None = Field(default=None, serialization_alias="suggestedMessage")
+    rule_name: str | None = Field(default=None, serialization_alias="ruleName")
+    created_at: str = Field(serialization_alias="createdAt")
+
+
+class FlaggedCandidateDetail(BaseModel):
+    candidate_id: str = Field(serialization_alias="candidateId")
+    candidate_name: str = Field(serialization_alias="candidateName")
+    role: str | None = None
+    recruiter: str | None = None
+    days_to_join: int = Field(serialization_alias="daysToJoin")
+    last_contact_days: int = Field(serialization_alias="lastContactDays")
+    previous_risk: str = Field(serialization_alias="previousRisk")
+    current_risk: str = Field(serialization_alias="currentRisk")
+    flag_applied: bool = Field(serialization_alias="flagApplied")
+    draft_message: str = Field(serialization_alias="draftMessage")
+    task_created: bool = Field(serialization_alias="taskCreated")
+    existing_task: bool = Field(serialization_alias="existingTask")
+
+
+class EvaluateRulesResponse(BaseModel):
+    rule_name: str = Field(serialization_alias="ruleName")
+    evaluated_candidates_count: int = Field(serialization_alias="evaluatedCandidatesCount")
+    flagged_count: int = Field(serialization_alias="flaggedCount")
+    tasks_created_count: int = Field(serialization_alias="tasksCreatedCount")
+    notifications_created_count: int = Field(serialization_alias="notificationsCreatedCount")
+    flagged_candidates: list[FlaggedCandidateDetail] = Field(serialization_alias="flaggedCandidates")
+    summary: str
+
+
+class NotificationResponse(BaseModel):
+    id: str
+    kind: str
+    title: str
+    body: str
+    created_at: str = Field(serialization_alias="createdAt")
+    read: bool
+    recipient: str
+    entity_type: str | None = Field(default=None, serialization_alias="entityType")
+    entity_id: str | None = Field(default=None, serialization_alias="entityId")
+
+
+class SendMessageRequest(BaseModel):
+    channel: str = Field(pattern="^(WhatsApp|Email|whatsapp|email)$")
+    message: str = Field(min_length=1, max_length=2_500)
+    subject: str | None = Field(default=None, max_length=200)
+    recipient_override: str | None = Field(default=None, alias="recipientOverride", max_length=200)
+    simulated: bool = Field(default=False)
+
+
+class SendMessageResponse(BaseModel):
+    success: bool
+    channel: str
+    status: str
+    details: str
+    deep_link: str | None = Field(default=None, serialization_alias="deepLink")
+    interaction_id: str = Field(serialization_alias="interactionId")
+    timestamp: str
+    candidate_id: str = Field(serialization_alias="candidateId")
+    candidate_name: str = Field(serialization_alias="candidateName")
+    recipient: str
+
+

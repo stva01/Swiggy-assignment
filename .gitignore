@@ -1,0 +1,46 @@
+# Dependencies
+**/node_modules
+**/.pnpm-store
+
+# Python
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
+**/.coverage
+**/htmlcov
+**/.venv
+**/venv
+**/env
+
+# SQLite & Databases
+**/*.db-shm
+**/*.db-wal
+dev/backend/post_offer_hq.db-shm
+dev/backend/post_offer_hq.db-wal
+
+# Build outputs
+**/dist
+**/build
+**/*.dist
+**/.tsbuildinfo
+
+# Environment variables
+**/.env
+**/.env.local
+**/.env.*.local
+
+# IDE & Editor
+**/.vscode
+**/.idea
+**/*.swp
+**/*.swo
+**/*~
+**/.DS_Store
+**/Thumbs.db
+
+# Office / Temporary
+**/~$*
+**/.manus-logs
+**/.webdev

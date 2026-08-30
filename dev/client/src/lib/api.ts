@@ -86,8 +86,140 @@ export async function fetchCandidates(params: { search?: string; risk?: string; 
   return response.json() as Promise<CandidatePage>;
 }
 
+export type Task = {
+  id: string;
+  candidateId: string;
+  candidate: string;
+  candidateInitials?: string;
+  role?: string;
+  location?: string;
+  dueLabel: string;
+  dueGroup: "Overdue" | "Today" | "Upcoming";
+  action: string;
+  source: "system" | "AI" | "human" | "automation";
+  accent: "orange" | "tomato" | "sage";
+  status?: "open" | "completed" | "dismissed";
+  assignedTo?: string | null;
+  suggestedMessage?: string | null;
+  ruleName?: string | null;
+  createdAt?: string;
+};
+
+export type FlaggedCandidateDetail = {
+  candidateId: string;
+  candidateName: string;
+  role?: string;
+  recruiter?: string;
+  daysToJoin: number;
+  lastContactDays: number;
+  previousRisk: string;
+  currentRisk: string;
+  flagApplied: boolean;
+  draftMessage: string;
+  taskCreated: boolean;
+  existingTask: boolean;
+};
+
+export type EvaluateRulesResponse = {
+  ruleName: string;
+  evaluatedCandidatesCount: number;
+  flaggedCount: number;
+  tasksCreatedCount: number;
+  notificationsCreatedCount: number;
+  flaggedCandidates: FlaggedCandidateDetail[];
+  summary: string;
+};
+
+export type ApiNotification = {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  createdAt: string;
+  read: boolean;
+  recipient?: string;
+  entityType?: string;
+  entityId?: string;
+};
+
+export async function fetchTasks(status: string = "open"): Promise<Task[]> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tasks?status=${encodeURIComponent(status)}`);
+  if (!response.ok) throw new Error(`Tasks request failed with ${response.status}`);
+  return response.json() as Promise<Task[]>;
+}
+
+export async function completeTask(taskId: string): Promise<Task> {
+  return persistedRequest<Task>(`/api/v1/tasks/${encodeURIComponent(taskId)}/complete`, "POST");
+}
+
+export async function dismissTask(taskId: string): Promise<Task> {
+  return persistedRequest<Task>(`/api/v1/tasks/${encodeURIComponent(taskId)}/dismiss`, "POST");
+}
+
+export async function assignTask(taskId: string, assignee: string = "Nisha Rao"): Promise<Task> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tasks/${encodeURIComponent(taskId)}/assign?assignee=${encodeURIComponent(assignee)}`, { method: "POST" });
+  if (!response.ok) throw new Error(`Assign task failed with ${response.status}`);
+  return response.json() as Promise<Task>;
+}
+
+export async function runEngagementRules(): Promise<EvaluateRulesResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/automations/run-engagement-rules`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error(`Engagement rule run failed with ${response.status}`);
+  return response.json() as Promise<EvaluateRulesResponse>;
+}
+
+export async function fetchBackendNotifications(): Promise<ApiNotification[]> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/notifications`);
+  if (!response.ok) throw new Error(`Notifications failed with ${response.status}`);
+  return response.json() as Promise<ApiNotification[]>;
+}
+
+export async function markBackendNotificationsRead(): Promise<void> {
+  await fetch(`${API_BASE_URL}/api/v1/notifications/mark-read`, { method: "POST" });
+}
+
+export type SendMessageResult = {
+  success: boolean;
+  channel: string;
+  status: string;
+  details: string;
+  deepLink?: string | null;
+  interactionId: string;
+  timestamp: string;
+  candidateId: string;
+  candidateName: string;
+  recipient: string;
+};
+
+export async function sendMessageToCandidate(
+  candidateId: string,
+  payload: { channel: string; message: string; subject?: string; recipientOverride?: string; simulated?: boolean }
+): Promise<SendMessageResult> {
+  return persistedRequest<SendMessageResult>(
+    `/api/v1/candidates/${encodeURIComponent(candidateId)}/send-message`,
+    "POST",
+    payload
+  );
+}
+
+export function createWhatsAppDeepLink(phone: string, text: string): string {
+  let clean = phone.replace(/[^\d+]/g, "");
+  if (clean.startsWith("+")) clean = clean.slice(1);
+  else if (clean.length === 10) clean = "91" + clean;
+  return `https://wa.me/${clean}?text=${encodeURIComponent(text)}`;
+}
+
+export function createMailtoLink(email: string, subject: string, body: string): string {
+  return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
 export async function requestHealth() {
   const response = await fetch(`${API_BASE_URL}/api/v1/health`);
   if (!response.ok) throw new Error(`Backend health check failed with ${response.status}`);
   return response.json() as Promise<{ status: string }>;
 }
+
+

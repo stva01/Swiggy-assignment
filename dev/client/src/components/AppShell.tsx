@@ -32,7 +32,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center justify-between gap-3 lg:block">
             <Link href="/" className="focus-ring inline-flex items-center gap-3 rounded-xl outline-none">
               <span className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-[#f56a2a] shadow-[0_8px_18px_rgba(245,106,42,0.22)]">
-                <img src="/manus-storage/post-offer-mark_787b2c60.png" alt="" className="h-7 w-7 object-contain" />
+                <img
+                  src="/assets/post-offer-mark_787b2c60.webp"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    if (!target.src.endsWith(".png")) {
+                      target.src = "/assets/post-offer-mark_787b2c60.png";
+                    } else {
+                      target.style.display = "none";
+                    }
+                  }}
+                  alt="Post-Offer HQ"
+                  className="h-7 w-7 object-contain"
+                />
               </span>
               <span className="hidden lg:block">
                 <span className="display-face block text-[19px] leading-none text-[#3c2920]">post-offer</span>

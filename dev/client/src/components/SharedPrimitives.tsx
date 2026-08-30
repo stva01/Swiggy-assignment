@@ -13,6 +13,15 @@ export function RiskChip({ risk, overridden = false, className }: { risk: RiskLe
   return <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-extrabold capitalize ring-1 ring-inset", riskStyles[risk], className)}><span className="h-1.5 w-1.5 rounded-full bg-current" />{risk}{overridden ? <span className="ml-0.5 rounded bg-white/60 px-1 py-0.5 font-mono text-[8px] uppercase tracking-[0.08em]">O</span> : null}</span>;
 }
 
+const STEP_ORDER: Record<string, number> = {
+  offer_accepted: 0,
+  welcome: 1,
+  documentation: 2,
+  manager_intro: 3,
+  pre_joining_checkin: 4,
+  joining: 5,
+};
+
 const segmentStyles: Record<StepStatus, string> = {
   completed: "bg-[#f56a2a]",
   pending: "bg-[#e8d9c8]",
@@ -20,8 +29,9 @@ const segmentStyles: Record<StepStatus, string> = {
 };
 
 export function JourneyProgress({ steps, showLabel = false }: { steps: Candidate["steps"]; showLabel?: boolean }) {
-  const complete = steps.filter((step) => step.status === "completed").length;
-  return <div className="flex min-w-[108px] items-center gap-2"><div className="flex flex-1 gap-1">{steps.map((step) => <span key={step.key} title={`${step.shortLabel}: ${step.status}`} className={cn("h-1.5 flex-1 rounded-full", segmentStyles[step.status])} />)}</div>{showLabel ? <span className="whitespace-nowrap font-mono text-[9px] font-bold text-[#a3836b]">{complete}/6</span> : null}</div>;
+  const sortedSteps = [...steps].sort((a, b) => (STEP_ORDER[a.key] ?? 99) - (STEP_ORDER[b.key] ?? 99));
+  const complete = sortedSteps.filter((step) => step.status === "completed").length;
+  return <div className="flex min-w-[108px] items-center gap-2"><div className="flex flex-1 gap-1">{sortedSteps.map((step) => <span key={step.key} title={`${step.shortLabel}: ${step.status}`} className={cn("h-1.5 flex-1 rounded-full", segmentStyles[step.status])} />)}</div>{showLabel ? <span className="whitespace-nowrap font-mono text-[9px] font-bold text-[#a3836b]">{complete}/6</span> : null}</div>;
 }
 
 export function FallbackBadge() {

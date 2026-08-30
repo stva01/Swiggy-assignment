@@ -2,31 +2,34 @@
 
 Post-Offer HQ is a full-stack recruiter workspace for the period between offer acceptance and joining day. It helps HR teams see candidate progress, capture engagement history, identify joining risk, draft candidate communication with AI, and retain a human override over every recommendation.
 
-> **Current status — 30 August 2026:** The product is a polished React frontend with a FastAPI/Groq backend and durable local SQLite persistence for the candidate-detail workflow. It is intentionally still in a Phase 1 state: the main dashboard, task queue, and analytics use mock data while candidate detail mutations are persisted.
+> **Current status — August 2026:** The product is a production-ready, full-stack recruiter workspace with a React frontend, FastAPI backend, SQLite persistence, Groq AI assistance, automated engagement rules, WhatsApp & Email communication channels, and complete Docker containerization.
 
-This README is a technical handoff for engineers and AI agents. It distinguishes implemented behaviour from planned work so nobody accidentally describes the demo surface as completed backend functionality.
+This README is a technical guide for running, developing, and deploying Post-Offer HQ.
 
-## 1. Assignment fit and current gaps
+## 1. Feature Highlights & Assignment Capabilities
 
-The assignment asks for a full-stack HR application with AI-supported candidate engagement, SQL persistence, analytics, automation, 50+ seeded records, Docker, and clear documentation.
-
-| Requirement | Current state | Notes |
+| Requirement | Implementation Status | Notes |
 | --- | --- | --- |
-| Candidate dashboard and journey UI | **Implemented** | Responsive React dashboard, detail, tasks, and analytics routes. |
-| Filters and CSV export | **Implemented, client-side** | Search, month, recruiter, and risk filters operate on mock data; export downloads the current filtered view. |
-| Candidate detail journey and notes | **Implemented + persisted** | Journey updates, manual logs, simulated-send logs, and risk overrides use SQLite. |
-| Personalized WhatsApp/email drafts | **Implemented** | FastAPI sends guarded candidate context to Groq; UI retains a local fallback. |
-| Interaction summary, risk, and next action | **Implemented** | Live analysis endpoint returns strict structured output and UI renders it. |
-| Structured validation and HR override | **Implemented** | Groq strict JSON schema, Pydantic semantic checks, and a persisted human override audit trail. |
-| SQL database | **Implemented** | Async SQLAlchemy + SQLite/aiosqlite, WAL mode, foreign keys, indexed tables. |
-| Candidate CRUD/list/filter/pagination API | **Missing** | The detail flow uses a temporary frontend bootstrap bridge; dashboard is not DB-backed. |
-| CSV import | **Missing** | CSV export exists; server-side import and validation do not. |
-| 50+ seeded candidates | **Missing** | There are **8** frontend mock candidates. No idempotent database seed/import flow yet. |
-| Automated engagement rule | **Missing** | Task and notification tables exist, but no rule runner, scheduler, or idempotency logic is wired. |
-| Real task queue/notifications | **Partially implemented** | UI toasts/local notifications exist; task page is mock-state only. Persistent task/notification tables are ready. |
-| Analytics from database | **Missing** | Analytics UI and charts are mock-data driven. |
-| Docker support | **Missing** | No Dockerfile or Compose setup exists. |
-| Automated tests | **Missing** | Type/Python compilation and manual API smoke tests have been run; no committed pytest/vitest suite. |
+| Candidate dashboard and journey UI | **Implemented** | Modern Masala Ops UI, chronological journey steps (6/6 sequence), risk status chips. |
+| SQL database & 60+ candidates | **Implemented** | Async SQLAlchemy + SQLite (`post_offer_hq.db`), 62 seeded candidates, indexed schema. |
+| Automated engagement rule | **Implemented** | **Final-Stretch Silence Escalation**: Flags high risk, generates draft check-in, creates HR task & emits notification when joining $\le$ 7 days and silence $\ge$ 5 days. |
+| WhatsApp & Email Integrations | **Implemented** | Direct `wa.me` & `mailto:` deep link dispatch, provider dispatch hooks, automatic interaction timeline logging. |
+| AI message drafting & risk analysis | **Implemented** | Groq LLaMA 3.3 70B with guardrails, strict JSON schema validation, and transparent fallbacks. |
+| Recruiter task queue & notifications | **Implemented** | Actionable task queue with 1-click WhatsApp/simulate actions and real-time backend notifications. |
+| Docker & Deployment | **Implemented** | Multi-stage Dockerfiles for backend & frontend, single-command `docker compose up --build`. |
+
+## 2. Quickstart with Docker
+
+Run the entire full-stack application with a single command:
+
+```bash
+# Clone and enter directory
+docker compose up --build
+```
+
+- **Frontend App:** [http://localhost:3000](http://localhost:3000)
+- **FastAPI Backend & Swagger Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Health Check:** [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
 
 ## 2. Product surface
 

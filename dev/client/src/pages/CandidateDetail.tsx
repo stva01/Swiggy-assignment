@@ -4,7 +4,23 @@ import { ArrowLeft, CalendarDays, Check, ChevronRight, CircleAlert, Clock3, File
 import { Link, useLocation, useRoute } from "wouter";
 import { toast } from "sonner";
 import { Avatar, FallbackBadge, LiveAIBadge, PendingButton, RiskChip, SectionLabel } from "@/components/SharedPrimitives";
-import { bootstrapCandidate, createManualInteraction, createRiskOverride, fetchCandidateDetail, fetchCandidateState, requestCandidateAnalysis, requestGeneratedMessage, updateJourneyStep, type CandidateAIContext, type CandidateAnalysisResponse, type CandidateState, type MessageTone } from "@/lib/api";
+import {
+  bootstrapCandidate,
+  createMailtoLink,
+  createManualInteraction,
+  createRiskOverride,
+  createWhatsAppDeepLink,
+  fetchCandidateDetail,
+  fetchCandidateState,
+  requestCandidateAnalysis,
+  requestGeneratedMessage,
+  sendMessageToCandidate,
+  updateJourneyStep,
+  type CandidateAIContext,
+  type CandidateAnalysisResponse,
+  type CandidateState,
+  type MessageTone,
+} from "@/lib/api";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { candidates as seedCandidates, interactions as seedInteractions, type Candidate, type RiskLevel, type StepStatus } from "@/lib/mockData";
 import { cn } from "@/lib/utils";
@@ -38,7 +54,21 @@ export default function CandidateDetail() {
     let active = true;
     if (!params?.id) return () => { active = false; };
     if (seed) {
-      void bootstrapCandidate({ candidateId: seed.id, name: seed.name, email: seed.email, role: seed.role, department: seed.department, location: seed.location, recruiter: seed.recruiter, offerDate: seed.offerDate, joiningDate: seed.joiningDate, risk: seed.risk, aiRisk: seed.aiRisk, steps: seed.steps.map(({ key, label, status }) => ({ key, label, status })), interactions: seedInteractions.map(({ channel, direction, text, tone }) => ({ channel, direction: direction === "in" ? "in" : "out", text, tone })) }).then((state) => { if (active) applyPersistedState(state); }).catch(() => { if (active) toast("Local database is unavailable — working in demo mode"); });
+      void bootstrapCandidate({
+        candidateId: seed.id,
+        name: seed.name,
+        email: seed.email || `${seed.name.toLowerCase().replace(/ /g, ".")}@example.com`,
+        role: seed.role,
+        department: seed.department,
+        location: seed.location,
+        recruiter: seed.recruiter,
+        offerDate: seed.offerDate,
+        joiningDate: seed.joiningDate,
+        risk: seed.risk,
+        aiRisk: seed.aiRisk,
+        steps: seed.steps.map(({ key, label, status }) => ({ key, label, status })),
+        interactions: seedInteractions.map(({ channel, direction, text, tone }) => ({ channel, direction: direction === "in" ? "in" : "out", text, tone })),
+      }).then((state) => { if (active) applyPersistedState(state); }).catch(() => { if (active) toast("Local database is unavailable — working in demo mode"); });
     } else {
       void Promise.all([fetchCandidateDetail(params.id), fetchCandidateState(params.id)]).then(([detail, state]) => { if (!active) return; setCandidate(detail); applyPersistedState(state); }).catch(() => { if (active) toast("Candidate could not be loaded from the database"); });
     }
@@ -93,14 +123,68 @@ export default function CandidateDetail() {
     }
   };
 
-  const sendDraft = async () => {
-    if (!composer.draft.trim()) { toast("Generate or write a message first"); return; }
+  const sendViaChannel = async (mode: "whatsapp" | "email" | "simulated") => {
+    if (!composer.draft.trim()) {
+      toast("Generate or write a message first");
+      return;
+    }
+    const channel = mode === "whatsapp" ? "WhatsApp" : mode === "email" ? "Email" : composer.channel;
     try {
-      const saved = await createManualInteraction(candidate.id, { channel: composer.channel, text: composer.draft, tone: "Simulated send" });
-      setInteractions((current) => [saved, ...current]);
+      const res = await sendMessageToCandidate(candidate.id, {
+        channel,
+        message: composer.draft,
+        subject: `Swiggy Onboarding: Welcome ${candidate.name.split(" ")[0]}!`,
+        simulated: mode === "simulated",
+      });
+
+      // Update interaction history locally
+      setInteractions((current) => [
+        {
+          id: res.interactionId,
+          channel: res.channel,
+          direction: "out",
+          timestamp: "Just now",
+          text: composer.draft,
+          tone: mode === "simulated" ? "Simulated dispatch" : `Direct ${channel}`,
+        },
+        ...current,
+      ]);
+
+      if (mode === "whatsapp") {
+        const phone = candidate.phone || "+919876543210";
+        const link = res.deepLink || createWhatsAppDeepLink(phone, composer.draft);
+        window.open(link, "_blank", "noopener,noreferrer");
+        toast(`WhatsApp opened for ${candidate.name} & logged to timeline`);
+      } else if (mode === "email") {
+        const email = candidate.email || `${candidate.name.toLowerCase().replace(" ", ".")}@example.com`;
+        const link = res.deepLink || createMailtoLink(email, `Swiggy Onboarding: Welcome ${candidate.name.split(" ")[0]}!`, composer.draft);
+        window.location.href = link;
+        toast(`Email draft opened for ${email} & logged to timeline`);
+      } else {
+        toast(`Message logged to timeline (${channel} simulated dispatch)`);
+      }
+
       setComposer((current) => ({ ...current, draft: "" }));
-      toast("Message logged — simulated send only");
-    } catch { toast("Message could not be saved"); }
+    } catch {
+      // Fallback local persistence if backend is offline
+      try {
+        const saved = await createManualInteraction(candidate.id, {
+          channel,
+          text: composer.draft,
+          tone: `${mode} dispatch`,
+        });
+        setInteractions((current) => [saved, ...current]);
+        if (mode === "whatsapp") {
+          window.open(createWhatsAppDeepLink(candidate.phone || "+919876543210", composer.draft), "_blank", "noopener,noreferrer");
+        } else if (mode === "email") {
+          window.location.href = createMailtoLink(candidate.email || "candidate@example.com", "Swiggy Onboarding", composer.draft);
+        }
+        setComposer((current) => ({ ...current, draft: "" }));
+        toast(`Message saved (${mode})`);
+      } catch {
+        toast("Message could not be saved");
+      }
+    }
   };
 
   const addManualInteraction = async () => {
@@ -125,7 +209,58 @@ export default function CandidateDetail() {
   return <div className="space-y-7">
     <div className="flex flex-wrap items-center justify-between gap-3"><button onClick={() => navigate("/")} className="focus-ring inline-flex items-center gap-2 text-xs font-extrabold text-[#856854] outline-none hover:text-[#f56a2a]"><ArrowLeft size={15} /> Back to offer desk</button><div className="flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#b3947d]"><span>Offer desk</span><ChevronRight size={12} /><span>{candidate.id}</span></div></div>
 
-    <section className="reveal-up overflow-hidden rounded-[26px] border border-[#eadcca] bg-[#fbf7f0] shadow-[0_16px_36px_rgba(91,57,36,0.065)]"><div className="relative grid gap-7 p-6 sm:p-8 lg:grid-cols-[1fr_300px] lg:p-9"><div className="absolute right-0 top-0 hidden h-full w-[34%] overflow-hidden bg-[#f7e6d2] opacity-70 lg:block"><img src="/manus-storage/candidate-detail-illustration_b1e53baa.png" alt="" className="h-full w-full object-cover mix-blend-multiply" /></div><div className="relative z-10"><div className="flex flex-wrap items-start gap-4"><Avatar initials={candidate.initials} tone={candidate.risk === "high" ? "orange" : "sage"} size="lg" /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h2 className="display-face text-[34px] leading-none text-[#3c2920]">{candidate.name}</h2><RiskChip risk={candidate.risk} overridden={Boolean(candidate.overrideReason)} /></div><p className="mt-2 text-sm font-extrabold text-[#725744]">{candidate.role}</p><div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-[11px] font-semibold text-[#a38570]"><span className="inline-flex items-center gap-1.5"><MapPin size={13} />{candidate.location}</span><span className="inline-flex items-center gap-1.5"><UserRound size={13} />{candidate.recruiter}</span><span className="inline-flex items-center gap-1.5"><Mail size={13} />{candidate.email}</span></div></div></div><div className="mt-8 grid gap-3 sm:grid-cols-3"><InfoStat label="Offer date" value={candidate.offerDate} icon={FileText} /><InfoStat label="Joining date" value={candidate.joiningDate} icon={CalendarDays} /><InfoStat label="Days to join" value={`${candidate.daysToJoin} days`} helper={candidate.daysToJoin <= 7 ? "Final stretch" : "Good runway"} icon={Clock3} highlight={candidate.daysToJoin <= 7} /></div></div><div className="relative z-10 rounded-[20px] bg-[#3c2920] p-5 text-[#fff9f0] shadow-[0_14px_28px_rgba(60,41,32,0.13)]"><div className="mb-5 flex items-center gap-2"><span className="h-1.5 w-8 rounded-full bg-[#f56a2a]" /><span className="h-1.5 w-1.5 rounded-full bg-[#f56a2a]" /><span className="h-1.5 w-1.5 rounded-full bg-white/30" /><span className="h-1.5 w-1.5 rounded-full bg-white/30" /></div><div className="flex items-center justify-between"><SectionLabel className="text-[#c7a990]">Effective risk</SectionLabel><button aria-label="Risk options" onClick={() => toast("Risk options are available below") } className="rounded-lg p-1 text-[#c7a990] hover:bg-white/10"><MoreHorizontal size={16} /></button></div><div className="mt-6 flex items-end gap-3"><span className="display-face text-[50px] leading-none capitalize text-[#f56a2a]">{candidate.risk}</span><span className="mb-1 text-[10px] font-bold text-[#cbb19b]">current</span></div><p className="mt-3 text-[11px] leading-5 text-[#dbc7b6]">{effectiveLabel}</p><div className="mt-5 border-t border-white/10 pt-4"><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#c7a990]">AI original</p><div className="mt-2 flex items-center justify-between"><span className="text-xs font-extrabold capitalize text-[#fff9f0]">{candidate.aiRisk} risk</span>{candidate.overrideReason ? <span className="rounded-md bg-white/10 px-2 py-1 text-[9px] font-bold text-[#dbc7b6]">overridden</span> : null}</div></div><button onClick={() => setOverrideOpen(true)} className="focus-ring mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/15 px-3 py-2.5 text-[11px] font-extrabold text-[#fff9f0] outline-none hover:border-[#f5a074] hover:bg-white/5"><Pencil size={13} /> Override risk</button></div></div><div className="flex flex-col gap-3 border-t border-[#eee2d3] bg-[#f8f1e6] px-6 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-8"><div className="flex items-center gap-3"><div className="flex -space-x-2"><Avatar initials={candidate.recruiterInitials} tone="cocoa" size="sm" /><Avatar initials="AI" tone="orange" size="sm" /></div><p className="text-[11px] font-semibold text-[#806350]">Owned by <span className="font-extrabold text-[#4a3428]">{candidate.recruiter}</span> · assisted by HQ AI</p></div><div className="flex items-center gap-2 text-[10px] font-semibold text-[#9c7d67]"><ShieldCheck size={14} className="text-[#6b906d]" /> Last reviewed today</div></div></section>
+    <section className="reveal-up overflow-hidden rounded-[26px] border border-[#eadcca] bg-[#fbf7f0] shadow-[0_16px_36px_rgba(91,57,36,0.065)]">
+      <div className="relative grid gap-7 p-6 sm:p-8 lg:grid-cols-[1fr_300px] lg:p-9">
+        <div className="absolute right-0 top-0 hidden h-full w-[34%] overflow-hidden bg-[#f7e6d2] opacity-70 lg:block">
+          <img
+            src="/assets/candidate-detail-illustration_b1e53baa.webp"
+            onError={(e) => {
+              const target = e.target as HTMLImageElement;
+              if (!target.src.endsWith(".png")) {
+                target.src = "/assets/candidate-detail-illustration_b1e53baa.png";
+              } else {
+                target.style.display = "none";
+              }
+            }}
+            alt=""
+            className="h-full w-full object-cover mix-blend-multiply"
+          />
+        </div><div className="relative z-10"><div className="flex flex-wrap items-start gap-4"><Avatar initials={candidate.initials} tone={candidate.risk === "high" ? "orange" : "sage"} size="lg" /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h2 className="display-face text-[34px] leading-none text-[#3c2920]">{candidate.name}</h2><RiskChip risk={candidate.risk} overridden={Boolean(candidate.overrideReason)} />{candidate.overrideReason?.includes("Automated") ? <span className="inline-flex items-center gap-1 rounded-full bg-[#fee2e2] px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-[#b91c1c]"><Sparkles size={11} /> Auto-Flagged by Rule</span> : null}</div><p className="mt-2 text-sm font-extrabold text-[#725744]">{candidate.role}</p><div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-[11px] font-semibold text-[#a38570]"><span className="inline-flex items-center gap-1.5"><MapPin size={13} />{candidate.location}</span><span className="inline-flex items-center gap-1.5"><UserRound size={13} />{candidate.recruiter}</span><span className="inline-flex items-center gap-1.5"><Mail size={13} />{candidate.email}</span></div></div></div><div className="mt-8 grid gap-3 sm:grid-cols-3"><InfoStat label="Offer date" value={candidate.offerDate} icon={FileText} /><InfoStat label="Joining date" value={candidate.joiningDate} icon={CalendarDays} /><InfoStat label="Days to join" value={`${candidate.daysToJoin} days`} helper={candidate.daysToJoin <= 7 ? "Final stretch" : "Good runway"} icon={Clock3} highlight={candidate.daysToJoin <= 7} /></div></div><div className="relative z-10 rounded-[20px] bg-[#3c2920] p-5 text-[#fff9f0] shadow-[0_14px_28px_rgba(60,41,32,0.13)]"><div className="mb-5 flex items-center gap-2"><span className="h-1.5 w-8 rounded-full bg-[#f56a2a]" /><span className="h-1.5 w-1.5 rounded-full bg-[#f56a2a]" /><span className="h-1.5 w-1.5 rounded-full bg-white/30" /><span className="h-1.5 w-1.5 rounded-full bg-white/30" /></div><div className="flex items-center justify-between"><SectionLabel className="text-[#c7a990]">Effective risk</SectionLabel><button aria-label="Risk options" onClick={() => toast("Risk options are available below") } className="rounded-lg p-1 text-[#c7a990] hover:bg-white/10"><MoreHorizontal size={16} /></button></div><div className="mt-6 flex items-end gap-3"><span className="display-face text-[50px] leading-none capitalize text-[#f56a2a]">{candidate.risk}</span><span className="mb-1 text-[10px] font-bold text-[#cbb19b]">current</span></div><p className="mt-3 text-[11px] leading-5 text-[#dbc7b6]">{effectiveLabel}</p><div className="mt-5 border-t border-white/10 pt-4"><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#c7a990]">AI original</p><div className="mt-2 flex items-center justify-between"><span className="text-xs font-extrabold capitalize text-[#fff9f0]">{candidate.aiRisk} risk</span>{candidate.overrideReason ? <span className="rounded-md bg-white/10 px-2 py-1 text-[9px] font-bold text-[#dbc7b6]">overridden</span> : null}</div></div><button onClick={() => setOverrideOpen(true)} className="focus-ring mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/15 px-3 py-2.5 text-[11px] font-extrabold text-[#fff9f0] outline-none hover:border-[#f5a074] hover:bg-white/5"><Pencil size={13} /> Override risk</button></div></div><div className="flex flex-col gap-3 border-t border-[#eee2d3] bg-[#f8f1e6] px-6 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-8"><div className="flex items-center gap-3"><div className="flex -space-x-2"><Avatar initials={candidate.recruiterInitials} tone="cocoa" size="sm" /><Avatar initials="AI" tone="orange" size="sm" /></div><p className="text-[11px] font-semibold text-[#806350]">Owned by <span className="font-extrabold text-[#4a3428]">{candidate.recruiter}</span> · assisted by HQ AI</p></div><div className="flex items-center gap-2 text-[10px] font-semibold text-[#9c7d67]"><ShieldCheck size={14} className="text-[#6b906d]" /> Last reviewed today</div></div></section>
+
+    {/* Automated Rule Escalation Banner if candidate is in final stretch with high silence */}
+    {(candidate.overrideReason?.includes("Automated") || (candidate.daysToJoin <= 7 && candidate.lastContactDays >= 5)) && (
+      <section className="reveal-up rounded-[22px] border border-[#efc5a9] bg-[#fff5ee] p-5 shadow-[0_10px_25px_rgba(245,106,42,0.06)]">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#fcd8c4] text-[#d8593d]">
+              <Sparkles size={18} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#d8593d]">Automated Engagement Rule Triggered</span>
+                <span className="rounded-full bg-[#fde3d6] px-2 py-0.5 font-mono text-[9px] font-bold text-[#b44831]">Final-Stretch Silence</span>
+              </div>
+              <h4 className="mt-1 text-sm font-extrabold text-[#4a3428]">
+                {candidate.name} joins in {candidate.daysToJoin} days with {candidate.lastContactDays >= 999 ? "no recent" : `${candidate.lastContactDays} days of`} interaction.
+              </h4>
+              <p className="mt-1 text-xs text-[#7a5c48]">
+                The automated rule elevated effective risk to High and prepared an outreach draft below to prevent candidate drop-off.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              const draft = `Hi ${candidate.name.split(" ")[0]} — with your ${candidate.joiningDayLabel} joining date approaching in ${candidate.daysToJoin} days, I wanted to check in. Is there anything we can help clarify for your start as ${candidate.role}? Looking forward to welcoming you!`;
+              setComposer((current) => ({ ...current, draft, tone: "Friendly" }));
+              toast.success("Loaded personalized outreach draft into composer below!");
+            }}
+            className="focus-ring inline-flex items-center justify-center gap-2 rounded-xl bg-[#f56a2a] px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-[#df571e]"
+          >
+            <Send size={13} /> Load Outreach Draft
+          </button>
+        </div>
+      </section>
+    )}
 
     <section className="reveal-up reveal-up-delay-1 rounded-[22px] border border-[#eadcca] bg-[#fbf7f0] p-5 shadow-[0_12px_30px_rgba(91,57,36,0.05)] sm:p-7"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end"><div><SectionLabel>Service line</SectionLabel><h3 className="display-face mt-2 text-[27px] leading-none text-[#3c2920]">Journey to joining day</h3><p className="mt-2 text-xs font-medium text-[#a38570]">{completedCount} of 6 steps complete · {overdueCount} overdue</p></div><div className="flex items-center gap-2 rounded-xl bg-[#f3eadf] px-3 py-2"><div className="flex w-24 gap-1">{candidate.steps.map((step) => <span key={step.key} className={cn("h-1.5 flex-1 rounded-full", step.status === "completed" ? "bg-[#f56a2a]" : step.status === "overdue" ? "bg-[#d8593d]" : "bg-[#dfcfbd]")} />)}</div><span className="font-mono text-[10px] font-bold text-[#90715e]">{Math.round(completedCount / 6 * 100)}%</span></div></div><div className="mt-8 grid gap-3 md:grid-cols-6">{candidate.steps.map((step, index) => <JourneyNode key={step.key} step={step} index={index} onToggle={() => toggleStep(step.key)} />)}</div></section>
 
@@ -140,7 +275,101 @@ export default function CandidateDetail() {
       <section className="reveal-up reveal-up-delay-3 rounded-[22px] border border-[#eadcca] bg-[#fbf7f0] p-5 shadow-[0_12px_30px_rgba(91,57,36,0.05)] sm:p-7"><div className="flex items-start justify-between gap-3"><div><SectionLabel>Conversation log</SectionLabel><h3 className="display-face mt-2 text-[27px] leading-none text-[#3c2920]">Last touches</h3></div><span className="rounded-full bg-[#f3eadf] px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-[0.08em] text-[#9e7f68]">{interactions.length} logged</span></div><div className="mt-6 space-y-5">{interactions.map((interaction) => <div key={interaction.id} className="relative pl-8"><span className={cn("absolute left-0 top-1 flex h-5 w-5 items-center justify-center rounded-full", interaction.direction === "out" ? "bg-[#f8d5be] text-[#a15028]" : "bg-[#dbe8d6] text-[#5b7d5c]")}>{interaction.channel === "Email" ? <Mail size={10} /> : interaction.channel === "Note" ? <FileText size={10} /> : <MessageCircle size={10} />}</span><div className="flex flex-wrap items-center gap-2"><span className="text-[10px] font-extrabold text-[#5b4030]">{interaction.channel} · {interaction.direction === "out" ? "You" : candidate.name.split(" ")[0]}</span><span className="text-[10px] text-[#ae917c]">{interaction.timestamp}</span></div><p className="mt-1.5 text-xs leading-5 text-[#725744]">{interaction.text}</p><p className="mt-1 font-mono text-[9px] font-bold uppercase tracking-[0.1em] text-[#b59884]">{interaction.tone}</p></div>)}</div><div className="mt-6 border-t border-[#eee2d3] pt-5"><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#a98a74]">Add a manual log</p><div className="mt-3 flex gap-2"><input value={manualMessage} onChange={(event) => setManualMessage(event.target.value)} placeholder="e.g. Spoke and confirmed move" className="focus-ring min-w-0 flex-1 rounded-xl border border-[#e4d5c3] bg-[#fffaf3] px-3 py-2.5 text-xs font-semibold text-[#4a3428] outline-none placeholder:text-[#bd9f8a]" /><button onClick={addManualInteraction} className="focus-ring rounded-xl bg-[#3c2920] px-3 py-2.5 text-xs font-extrabold text-[#fff9f0] outline-none hover:bg-[#51382b]"><Send size={14} /></button></div></div></section>
     </div>
 
-    <section className="reveal-up reveal-up-delay-4 rounded-[22px] border border-[#efcfb8] bg-[#fff7ef] p-5 shadow-[0_14px_32px_rgba(245,106,42,0.07)] sm:p-7"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div><div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#f9d7bf] text-[#f56a2a]"><Sparkles size={15} /></span><div><SectionLabel>Chat with AI assist</SectionLabel><h3 className="display-face mt-2 text-[27px] leading-none text-[#3c2920]">Make the next touch count</h3></div></div><p className="mt-3 max-w-xl text-xs leading-5 text-[#886b57]">Draft a personalized message using real candidate context. Choose a tone before generating; sending is simulated and only writes to this conversation log.</p></div><FallbackBadge /></div><div className="mt-6 grid gap-3 lg:grid-cols-[150px_150px_1fr_auto] lg:items-end"><label className="block"><span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.12em] text-[#ae8f78]">Channel</span><select value={composer.channel} onChange={(event) => setComposer((current) => ({ ...current, channel: event.target.value }))} className="focus-ring w-full rounded-xl border border-[#ead0bc] bg-[#fffaf3] px-3 py-2.5 text-xs font-bold text-[#624534] outline-none"><option>WhatsApp</option><option>Email</option></select></label><label className="block"><span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.12em] text-[#ae8f78]">Tone</span><select value={composer.tone} onChange={(event) => setComposer((current) => ({ ...current, tone: event.target.value as MessageTone }))} className="focus-ring w-full rounded-xl border border-[#ead0bc] bg-[#fffaf3] px-3 py-2.5 text-xs font-bold text-[#624534] outline-none"><option>Friendly</option><option>Formal</option><option>Urgent</option></select></label><label className="block"><span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.12em] text-[#ae8f78]">Draft message</span><textarea value={composer.draft} onChange={(event) => setComposer((current) => ({ ...current, draft: event.target.value }))} rows={3} placeholder="Generate a message grounded in this candidate's journey…" className="focus-ring w-full resize-none rounded-xl border border-[#ead0bc] bg-[#fffaf3] px-3 py-2.5 text-xs font-semibold leading-5 text-[#624534] outline-none placeholder:text-[#c09f88]" /></label><div className="flex gap-2 lg:flex-col"><PendingButton pending={generating} onClick={generateDraft} className="focus-ring rounded-xl bg-[#3c2920] px-4 py-2.5 text-[11px] font-extrabold text-[#fff9f0] outline-none hover:bg-[#51382b]"><Sparkles size={13} /> Generate</PendingButton><button onClick={sendDraft} className="focus-ring rounded-xl border border-[#e6b893] bg-[#f56a2a] px-4 py-2.5 text-[11px] font-extrabold text-white outline-none hover:bg-[#df571e]"><Send size={13} /></button></div></div><div className="mt-4 flex items-center gap-2 font-mono text-[9px] font-bold uppercase tracking-[0.1em] text-[#b3927a]"><ShieldCheck size={13} className="text-[#6b906d]" /> AI assist uses candidate context · simulated sending only · draft model: hq-writer-v1</div></section>
+    <section className="reveal-up reveal-up-delay-4 rounded-[22px] border border-[#efcfb8] bg-[#fff7ef] p-5 shadow-[0_14px_32px_rgba(245,106,42,0.07)] sm:p-7">
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#f9d7bf] text-[#f56a2a]">
+              <Sparkles size={15} />
+            </span>
+            <div>
+              <SectionLabel>Outreach & Communication</SectionLabel>
+              <h3 className="display-face mt-2 text-[27px] leading-none text-[#3c2920]">Make the next touch count</h3>
+            </div>
+          </div>
+          <p className="mt-3 max-w-xl text-xs leading-5 text-[#886b57]">
+            Draft a personalized message using real candidate context. Dispatch directly via WhatsApp, standard Email client, or simulate sending to test timelines.
+          </p>
+        </div>
+        <FallbackBadge />
+      </div>
+
+      <div className="mt-6 grid gap-3 lg:grid-cols-[150px_150px_1fr] lg:items-end">
+        <label className="block">
+          <span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.12em] text-[#ae8f78]">Channel</span>
+          <select
+            value={composer.channel}
+            onChange={(event) => setComposer((current) => ({ ...current, channel: event.target.value }))}
+            className="focus-ring w-full rounded-xl border border-[#ead0bc] bg-[#fffaf3] px-3 py-2.5 text-xs font-bold text-[#624534] outline-none"
+          >
+            <option>WhatsApp</option>
+            <option>Email</option>
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.12em] text-[#ae8f78]">Tone</span>
+          <select
+            value={composer.tone}
+            onChange={(event) => setComposer((current) => ({ ...current, tone: event.target.value as MessageTone }))}
+            className="focus-ring w-full rounded-xl border border-[#ead0bc] bg-[#fffaf3] px-3 py-2.5 text-xs font-bold text-[#624534] outline-none"
+          >
+            <option>Friendly</option>
+            <option>Formal</option>
+            <option>Urgent</option>
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.12em] text-[#ae8f78]">Draft message</span>
+          <textarea
+            value={composer.draft}
+            onChange={(event) => setComposer((current) => ({ ...current, draft: event.target.value }))}
+            rows={3}
+            placeholder="Generate or write a message grounded in this candidate's journey…"
+            className="focus-ring w-full resize-none rounded-xl border border-[#ead0bc] bg-[#fffaf3] px-3 py-2.5 text-xs font-semibold leading-5 text-[#624534] outline-none placeholder:text-[#c09f88]"
+          />
+        </label>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[#f0ded0] pt-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <PendingButton
+            pending={generating}
+            onClick={generateDraft}
+            className="focus-ring rounded-xl bg-[#3c2920] px-4 py-2.5 text-[11px] font-extrabold text-[#fff9f0] outline-none hover:bg-[#51382b]"
+          >
+            <Sparkles size={13} /> AI Generate Draft
+          </PendingButton>
+
+          <button
+            onClick={() => sendViaChannel("whatsapp")}
+            disabled={!composer.draft.trim()}
+            className="focus-ring inline-flex items-center gap-1.5 rounded-xl border border-[#c3e3be] bg-[#25d366]/10 px-3.5 py-2.5 text-[11px] font-extrabold text-[#1f8846] outline-none hover:bg-[#25d366]/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <MessageCircle size={14} /> Send WhatsApp (wa.me)
+          </button>
+
+          <button
+            onClick={() => sendViaChannel("email")}
+            disabled={!composer.draft.trim()}
+            className="focus-ring inline-flex items-center gap-1.5 rounded-xl border border-[#c4daf0] bg-[#0284c7]/10 px-3.5 py-2.5 text-[11px] font-extrabold text-[#0369a1] outline-none hover:bg-[#0284c7]/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Mail size={14} /> Send Email (mailto)
+          </button>
+
+          <button
+            onClick={() => sendViaChannel("simulated")}
+            disabled={!composer.draft.trim()}
+            className="focus-ring inline-flex items-center gap-1.5 rounded-xl border border-[#e6b893] bg-[#f56a2a] px-3.5 py-2.5 text-[11px] font-extrabold text-white outline-none hover:bg-[#df571e] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Send size={13} /> Log & Simulate
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 font-mono text-[9px] font-bold uppercase tracking-[0.1em] text-[#b3927a]">
+          <ShieldCheck size={13} className="text-[#6b906d]" /> Live WhatsApp & Email links ready
+        </div>
+      </div>
+    </section>
 
     {overrideOpen ? <OverrideModal current={candidate.risk} onClose={() => setOverrideOpen(false)} onSave={saveRiskOverride} /> : null}
   </div>;

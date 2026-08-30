@@ -30,6 +30,19 @@ async def initialize_database() -> None:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
 
+        # Migrate new columns on SQLite if tasks table existed without them
+        if settings.database_url.startswith("sqlite"):
+            def migrate_columns(sync_conn):
+                cursor = sync_conn.connection.cursor()
+                cursor.execute("PRAGMA table_info(tasks)")
+                columns = [row[1] for row in cursor.fetchall()]
+                if "suggested_message" not in columns:
+                    cursor.execute("ALTER TABLE tasks ADD COLUMN suggested_message TEXT")
+                if "rule_name" not in columns:
+                    cursor.execute("ALTER TABLE tasks ADD COLUMN rule_name VARCHAR(120)")
+                cursor.close()
+            await connection.run_sync(migrate_columns)
+
 
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with SessionLocal() as session:
