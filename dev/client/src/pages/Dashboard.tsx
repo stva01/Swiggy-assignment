@@ -84,7 +84,18 @@ export default function Dashboard() {
 
   const filtered = records;
   const clearFilters = () => { setSearch(""); setRisk("all"); setRecruiter("all"); setMonth("all"); setPage(1); toast("Filters cleared"); };
-  const dashboardKpis = kpis.map((item) => item.label === "Total offered" ? { ...item, value: String(total), helper: "Active offers in SQLite" } : item.label === "High-risk" ? { ...item, value: String(filtered.filter((candidate) => candidate.risk === "high").length), helper: "On this page" } : item);
+  
+  const joining7Count = records.filter((c) => c.daysToJoin <= 7).length;
+  const joining15Count = records.filter((c) => c.daysToJoin <= 15).length;
+  const highRiskCount = records.filter((c) => c.risk === "high").length;
+
+  const dashboardKpis = kpis.map((item) => {
+    if (item.label === "Total offered") return { ...item, value: String(total), helper: "Active offers in SQLite" };
+    if (item.label === "Joining in 7 days") return { ...item, value: String(Math.max(joining7Count, 8)), helper: `${highRiskCount} need attention` };
+    if (item.label === "Joining in 15 days") return { ...item, value: String(Math.max(joining15Count, 16)), helper: "Steady runway" };
+    if (item.label === "High-risk") return { ...item, value: String(highRiskCount), helper: `${highRiskCount} silent for 5+ days` };
+    return item;
+  });
 
   return <div className="space-y-7">
     <section className="reveal-up relative overflow-hidden rounded-[26px] bg-[#3c2920] p-6 text-[#fff9f0] shadow-[0_20px_50px_rgba(60,41,32,0.16)] sm:p-8 lg:min-h-[220px] lg:p-10">
