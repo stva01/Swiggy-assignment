@@ -40,36 +40,70 @@ from app.services.communication_service import CommunicationService
 from app.services.groq_service import AIServiceError, GroqHRService
 
 
+import logging
+import time
+from logging.handlers import RotatingFileHandler
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler("post_offer_hq.log", maxBytes=10_000_000, backupCount=5, encoding="utf-8"),
+    ],
+)
+logger = logging.getLogger("post_offer_hq")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("Starting Post-Offer HQ backend...")
     app.state.settings = get_settings()
     await initialize_database()
+    logger.info("Database initialized successfully.")
     try:
         yield
     finally:
+        logger.info("Shutting down Post-Offer HQ backend...")
         await engine.dispose()
 
 
 app = FastAPI(title="Post-Offer HQ API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "*"],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "PATCH"],
-    allow_headers=["Content-Type", "X-Request-ID"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS", "DELETE"],
+    allow_headers=["*"],
 )
 
 
 @app.middleware("http")
-async def request_id_middleware(request: Request, call_next):
-    request.state.request_id = request.headers.get("X-Request-ID", str(uuid4()))
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request.state.request_id
-    return response
+async def request_id_and_logging_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid4()))
+    request.state.request_id = request_id
+    start_time = time.perf_counter()
+    
+    try:
+        response = await call_next(request)
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.info(
+            f"[{request_id[:8]}] {request.method} {request.url.path} -> {response.status_code} ({duration_ms:.1f}ms)"
+        )
+        response.headers["X-Request-ID"] = request_id
+        return response
+    except Exception as exc:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.exception(f"[{request_id[:8]}] Uncaught exception during {request.method} {request.url.path} ({duration_ms:.1f}ms): {exc}")
+        return JSONResponse(
+            status_code=500,
+            content=ErrorResponse(code="internal_error", message=f"Server error: {str(exc)}", request_id=request_id).model_dump(by_alias=True),
+        )
 
 
 @app.exception_handler(AIServiceError)
 async def ai_service_error_handler(request: Request, error: AIServiceError):
+    logger.warning(f"AIServiceError [{error.code}]: {error.message}")
     return JSONResponse(
         status_code=error.status_code,
         content=ErrorResponse(code=error.code, message=error.message, request_id=request.state.request_id).model_dump(by_alias=True),
@@ -79,17 +113,19 @@ async def ai_service_error_handler(request: Request, error: AIServiceError):
 @app.exception_handler(HTTPException)
 async def http_error_handler(request: Request, error: HTTPException):
     detail = error.detail if isinstance(error.detail, dict) else {"code": "request_rejected", "message": str(error.detail)}
+    logger.warning(f"HTTPException [{error.status_code}] on {request.method} {request.url.path}: {detail}")
     return JSONResponse(
         status_code=error.status_code,
-        content=ErrorResponse(code=detail["code"], message=detail["message"], request_id=request.state.request_id).model_dump(by_alias=True),
+        content=ErrorResponse(code=detail.get("code", "error"), message=detail.get("message", "Error"), request_id=request.state.request_id).model_dump(by_alias=True),
     )
 
 
 @app.exception_handler(RequestValidationError)
-async def request_validation_error_handler(request: Request, _error: RequestValidationError):
+async def request_validation_error_handler(request: Request, error: RequestValidationError):
+    logger.warning(f"Validation error on {request.method} {request.url.path}: {error.errors()}")
     return JSONResponse(
         status_code=422,
-        content=ErrorResponse(code="invalid_request", message="Request data failed validation.", request_id=request.state.request_id).model_dump(by_alias=True),
+        content=ErrorResponse(code="invalid_request", message=f"Validation failed: {error.errors()[:2]}", request_id=request.state.request_id).model_dump(by_alias=True),
     )
 
 
@@ -224,11 +260,36 @@ async def bootstrap_candidate(external_id: str, payload: CandidateBootstrapReque
         raise HTTPException(status_code=422, detail={"code": "candidate_id_mismatch", "message": "Candidate id must match the URL."})
     candidate = await session.scalar(select(Candidate).where(Candidate.external_id == external_id))
     if not candidate:
-        candidate = Candidate(external_id=external_id, name=payload.name, email=payload.email, role=payload.role, department=payload.department, location=payload.location, recruiter=payload.recruiter, offer_date=parse_display_date(payload.offer_date), joining_date=parse_display_date(payload.joining_date), ai_risk=RiskLevel(payload.ai_risk.value), effective_risk=RiskLevel(payload.risk.value))
+        candidate = Candidate(
+            external_id=external_id,
+            name=payload.name,
+            email=payload.email,
+            role=payload.role,
+            department=payload.department,
+            location=payload.location,
+            recruiter=payload.recruiter,
+            offer_date=parse_display_date(payload.offer_date),
+            joining_date=parse_display_date(payload.joining_date),
+            ai_risk=RiskLevel(payload.ai_risk.value),
+            effective_risk=RiskLevel(payload.risk.value),
+        )
         session.add(candidate)
         await session.flush()
-        session.add_all([CandidateJourneyStep(candidate_id=candidate.id, step_key=step.key, label=step.label, status=JourneyStatus(step.status)) for step in payload.steps])
-        session.add_all([Interaction(candidate_id=candidate.id, channel=item.channel, direction=InteractionDirection(item.direction), body=item.text, tone=item.tone, source="seed") for item in payload.interactions])
+        session.add_all([
+            CandidateJourneyStep(candidate_id=candidate.id, step_key=step.key, label=step.label, status=JourneyStatus(step.status))
+            for step in payload.steps
+        ])
+        session.add_all([
+            Interaction(
+                candidate_id=candidate.id,
+                channel=item.channel,
+                direction=InteractionDirection.inbound if item.direction in ("in", "inbound") else InteractionDirection.outbound,
+                body=item.text,
+                tone=item.tone,
+                source="seed",
+            )
+            for item in payload.interactions
+        ])
         await session.commit()
     elif not candidate.joining_date:
         candidate.offer_date = parse_display_date(payload.offer_date)

@@ -53,25 +53,44 @@ export default function CandidateDetail() {
   useEffect(() => {
     let active = true;
     if (!params?.id) return () => { active = false; };
-    if (seed) {
-      void bootstrapCandidate({
-        candidateId: seed.id,
-        name: seed.name,
-        email: seed.email || `${seed.name.toLowerCase().replace(/ /g, ".")}@example.com`,
-        role: seed.role,
-        department: seed.department,
-        location: seed.location,
-        recruiter: seed.recruiter,
-        offerDate: seed.offerDate,
-        joiningDate: seed.joiningDate,
-        risk: seed.risk,
-        aiRisk: seed.aiRisk,
-        steps: seed.steps.map(({ key, label, status }) => ({ key, label, status })),
-        interactions: seedInteractions.map(({ channel, direction, text, tone }) => ({ channel, direction: direction === "in" ? "in" : "out", text, tone })),
-      }).then((state) => { if (active) applyPersistedState(state); }).catch(() => { if (active) toast("Local database is unavailable — working in demo mode"); });
-    } else {
-      void Promise.all([fetchCandidateDetail(params.id), fetchCandidateState(params.id)]).then(([detail, state]) => { if (!active) return; setCandidate(detail); applyPersistedState(state); }).catch(() => { if (active) toast("Candidate could not be loaded from the database"); });
-    }
+    
+    // First try fetching directly from live SQLite database
+    void Promise.all([fetchCandidateDetail(params.id), fetchCandidateState(params.id)])
+      .then(([detail, state]) => {
+        if (!active) return;
+        setCandidate(detail);
+        applyPersistedState(state);
+      })
+      .catch((err) => {
+        console.warn(`Candidate ${params.id} not found in database, attempting bootstrap...`, err);
+        if (seed) {
+          void bootstrapCandidate({
+            candidateId: seed.id,
+            name: seed.name,
+            email: seed.email || `${seed.name.toLowerCase().replace(/ /g, ".")}@example.com`,
+            role: seed.role,
+            department: seed.department,
+            location: seed.location,
+            recruiter: seed.recruiter,
+            offerDate: seed.offerDate,
+            joiningDate: seed.joiningDate,
+            risk: seed.risk,
+            aiRisk: seed.aiRisk,
+            steps: seed.steps.map(({ key, label, status }) => ({ key, label, status })),
+            interactions: seedInteractions.map(({ channel, direction, text, tone }) => ({ channel, direction: direction === "in" ? "in" : "out", text, tone })),
+          })
+            .then((state) => {
+              if (active) applyPersistedState(state);
+            })
+            .catch((bErr) => {
+              console.error("Bootstrap error:", bErr);
+              if (active) toast("Local database is unavailable — working in demo mode");
+            });
+        } else if (active) {
+          toast("Candidate could not be loaded from the database");
+        }
+      });
+
     return () => { active = false; };
   }, [params?.id]);
 
@@ -84,7 +103,8 @@ export default function CandidateDetail() {
     try {
       applyPersistedState(await updateJourneyStep(candidate.id, key, nextStatus));
       toast("Journey step saved");
-    } catch {
+    } catch (error) {
+      console.error("Failed to update journey step:", error);
       setCandidate(previous);
       toast("Journey step could not be saved");
     }
@@ -181,7 +201,8 @@ export default function CandidateDetail() {
         }
         setComposer((current) => ({ ...current, draft: "" }));
         toast(`Message saved (${mode})`);
-      } catch {
+      } catch (err) {
+        console.error("Message dispatch failed:", err);
         toast("Message could not be saved");
       }
     }
@@ -194,7 +215,10 @@ export default function CandidateDetail() {
       setInteractions((current) => [saved, ...current]);
       setManualMessage("");
       toast("Interaction saved to the candidate record");
-    } catch { toast("Manual log could not be saved"); }
+    } catch (err) {
+      console.error("Failed to save manual interaction:", err);
+      toast("Manual log could not be saved");
+    }
   };
 
   const saveRiskOverride = async (level: RiskLevel, reason: string) => {
@@ -203,7 +227,10 @@ export default function CandidateDetail() {
       setOverrideOpen(false);
       addNotification({ kind: "risk", title: "Risk status changed", body: `${candidate.name} is now marked ${level} risk by human override.` });
       toast("Risk override saved");
-    } catch { toast("Risk override could not be saved"); }
+    } catch (err) {
+      console.error("Failed to save risk override:", err);
+      toast("Risk override could not be saved");
+    }
   };
 
   return <div className="space-y-7">
