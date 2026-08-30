@@ -30,4 +30,4 @@ services:
         fromService:
           type: web
           name: post-offer-backend
-          property: url
+          property: host
