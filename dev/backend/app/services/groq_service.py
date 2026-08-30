@@ -118,7 +118,6 @@ Return JSON only.\n\n{context_as_data(context)}"""
                 model=self.settings.groq_main_model,
                 messages=[{"role": "system", "content": "Follow the JSON schema exactly."}, {"role": "user", "content": prompt}],
                 response_format={"type": "json_schema", "json_schema": {"name": name, "strict": True, "schema": schema}},
-                reasoning_effort="low",
                 temperature=temperature,
                 max_completion_tokens=max_tokens,
             )
