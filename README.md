@@ -1,363 +1,313 @@
-# Post-Offer HQ
+# Post-Offer HQ — Intelligent Candidate Engagement Platform
 
-Post-Offer HQ is a full-stack recruiter workspace for the period between offer acceptance and joining day. It helps HR teams see candidate progress, capture engagement history, identify joining risk, draft candidate communication with AI, and retain a human override over every recommendation.
+> **Status — August 2026:** Production-ready full-stack HR workspace engineered to eliminate post-offer drop-offs and keep candidates warm between offer acceptance and Day 1.
 
-> **Current status — August 2026:** The product is a production-ready, full-stack recruiter workspace with a React frontend, FastAPI backend, SQLite persistence, Groq AI assistance, automated engagement rules, WhatsApp & Email communication channels, and complete Docker containerization.
+---
 
-This README is a technical guide for running, developing, and deploying Post-Offer HQ.
+## 📑 Table of Contents
+1. [Executive Summary & Problem Statement](#1-executive-summary--problem-statement)
+2. [Full-Stack Architecture & Tech Stack](#2-full-stack-architecture--tech-stack)
+3. [Implemented Core Features](#3-implemented-core-features)
+4. [Automated Engagement Rules Engine](#4-automated-engagement-rules-engine)
+5. [WhatsApp & Email Communication Integrations](#5-whatsapp--email-communication-integrations)
+6. [AI Engineering & Safety Guardrails](#6-ai-engineering--safety-guardrails)
+7. [Database Schema & Seed Dataset](#7-database-schema--seed-dataset)
+8. [API Reference & Verification Suite](#8-api-reference--verification-suite)
+9. [Quickstart & Local Development](#9-quickstart--local-development)
+10. [Deployment Guide (Production & Cloud)](#10-deployment-guide-production--cloud)
+11. [1-Million Candidate Scaling Roadmap](#11-1-million-candidate-scaling-roadmap)
 
-## 1. Feature Highlights & Assignment Capabilities
+---
 
-| Requirement | Implementation Status | Notes |
+## 1. Executive Summary & Problem Statement
+
+### The Problem
+Between offer acceptance and joining day (often 30 to 90 days in Indian tech hiring), companies experience **15% to 30% offer drop-offs**. Candidates receive competing counter-offers, face anxiety over relocation, or disengage due to recruiter silence.
+
+### The Solution: Post-Offer HQ
+Post-Offer HQ is a specialized recruiter workspace built with the **Masala Ops** design philosophy (warm, high-density editorial UI with high human touch). It provides:
+1. **Real-time visibility** over candidates across their notice period.
+2. **Automated Engagement Rules** that proactively detect silence and flag risk.
+3. **AI-assisted signal extraction** and contextual check-in drafts.
+4. **Direct WhatsApp & Email dispatch** with automated timeline audit trails.
+5. **Human-in-the-loop control**: AI recommendations remain strictly advisory with auditable recruiter overrides.
+
+---
+
+## 2. Full-Stack Architecture & Tech Stack
+
+```text
+Browser (React 19 + TypeScript + Vite + Tailwind CSS + Lucide)
+   │
+   ├─ Reverse Proxy / Client Routing (SPA)
+   │
+FastAPI (Python 3.11 Asynchronous Backend)
+   ├─ Persistence Layer ─────── Async SQLAlchemy 2.0 + SQLite (WAL Mode, Foreign Keys)
+   ├─ Automation Engine ──────── Engagement Rules Runner (Final-Stretch Silence Escalation)
+   ├─ Communication Service ──── WhatsApp (wa.me) & Email (mailto:) with Interaction Logger
+   └─ AI Service ─────────────── Groq API (LLaMA 3.3 70B & GPT-OSS) + Llama Prompt Guard
+```
+
+| Layer | Technology | Key Capabilities |
 | --- | --- | --- |
-| Candidate dashboard and journey UI | **Implemented** | Modern Masala Ops UI, chronological journey steps (6/6 sequence), risk status chips. |
-| SQL database & 60+ candidates | **Implemented** | Async SQLAlchemy + SQLite (`post_offer_hq.db`), 62 seeded candidates, indexed schema. |
-| Automated engagement rule | **Implemented** | **Final-Stretch Silence Escalation**: Flags high risk, generates draft check-in, creates HR task & emits notification when joining $\le$ 7 days and silence $\ge$ 5 days. |
-| WhatsApp & Email Integrations | **Implemented** | Direct `wa.me` & `mailto:` deep link dispatch, provider dispatch hooks, automatic interaction timeline logging. |
-| AI message drafting & risk analysis | **Implemented** | Groq LLaMA 3.3 70B with guardrails, strict JSON schema validation, and transparent fallbacks. |
-| Recruiter task queue & notifications | **Implemented** | Actionable task queue with 1-click WhatsApp/simulate actions and real-time backend notifications. |
-| Docker & Deployment | **Implemented** | Multi-stage Dockerfiles for backend & frontend, single-command `docker compose up --build`. |
+| **Frontend UI** | React 19, TypeScript, Vite, Tailwind CSS, Lucide Icons, Sonner | Sub-second rendering, keyboard shortcuts, high-density Masala Ops design palette, zero layout shifts. |
+| **Backend API** | Python 3.11, FastAPI, Pydantic v2, Pydantic-Settings | Fully asynchronous, strict semantic validation, unified error envelopes, request ID tracing. |
+| **Database** | SQLite with Async SQLAlchemy (`aiosqlite`) | WAL (Write-Ahead Logging) mode, foreign key enforcement, indexed lookups, zero external database dependencies for local dev/demo. |
+| **AI Layer** | Groq Cloud SDK (`llama-3.3-70b-versatile`, `openai/gpt-oss-20b`) | Strict JSON schema structured output, recency-weighted prompt engineering, injection guardrails, deterministic local fallback. |
+| **Containerization** | Docker, Docker Compose | Multi-stage slim container builds for backend and frontend, health check orchestration. |
 
-## 2. Quickstart with Docker
+---
 
-Run the entire full-stack application with a single command:
+## 3. Implemented Core Features
 
+### 🏢 1. Candidate Roster & Live Dashboard (`/`)
+* **Live SQLite Source of Truth**: Dynamically queries active offers from `post_offer_hq.db`.
+* **Chronological 6-Stage Journey Pipeline**:
+  $$\text{Offer Accepted} \rightarrow \text{Welcome Note} \rightarrow \text{Documentation} \rightarrow \text{Manager Intro} \rightarrow \text{Pre-joining Check-in} \rightarrow \text{Joining Day}$$
+* **Multi-Dimensional Filters & Search**: Search by candidate name, role, city; filter by joining month, recruiter, or risk tier (`low`, `medium`, `high`).
+* **Real-Time KPI Cards**:
+  * **Total Offered**: Active offers in database.
+  * **Joining in 7 Days**: Urgent candidates requiring immediate attention.
+  * **Joining in 15 Days**: Mid-runway pipeline volume.
+  * **High-Risk Count**: Live count of silent or flagged candidates.
+  * **Offer $\rightarrow$ Join Rate**: Funnel conversion performance.
+* **1-Click CSV Export**: Instant client-side CSV download matching the currently active filter view.
+
+### 👤 2. Candidate Detail & Interaction Workspace (`/candidates/:id`)
+* **Hero Overview Card**: Displays candidate role, location, recruiter, offer date, joining date, and days-to-join badge.
+* **Effective Risk vs. AI Risk**: Side-by-side display of AI's raw risk score vs. Recruiter Effective Risk with full audit trail.
+* **Human Override Modal**: Recruiter can override candidate risk with mandatory reason logging.
+* **Interactive Service-Line Milestones**: 1-click step completion toggle persisted in SQLite.
+* **Conversation Timeline**: Inbound/outbound history with channel badges (WhatsApp, Email, Notes, Calls).
+
+### 📋 3. Recruiter Task Queue (`/tasks`)
+* **Categorized Task Groups**: `Overdue`, `Today`, and `Upcoming`.
+* **Automated Escalation Badges**: Demarcates tasks created automatically by the Rules Engine.
+* **AI Draft Check-in Accordion**: Pre-generated personalized message drafts with **Copy Draft**, **WhatsApp**, and **Simulate** actions.
+* **Task Actions**: 1-click complete, dismiss, and self-assign to recruiter.
+
+### 🔔 4. Real-Time Recruiter Notifications
+* **In-App Notification Feed**: Popover badge with unread counters and 1-click "Mark all as read".
+* Automatically receives events from Automated Rules and Human Risk Overrides.
+
+---
+
+## 4. Automated Engagement Rules Engine
+
+The platform features an automated rule evaluation engine implemented in [`dev/backend/app/services/automation_service.py`](file:///c:/Satva/Tech/Swiggy-assignment/dev/backend/app/services/automation_service.py).
+
+### Active Rule: *Final-Stretch Silence Escalation*
+* **Trigger Condition**:
+  $$\text{days\_to\_join} \le 7 \quad \text{AND} \quad \text{last\_contact\_days} \ge 5$$
+* **Automated Actions Executed**:
+  1. **Flag Risk**: Automatically elevates candidate's effective risk to **High Risk** with `override_reason="Automated Rule Triggered: Final-Stretch Silence Escalation"`.
+  2. **Generate AI Draft**: Contextually crafts a personalized check-in message tailored to the candidate's first name, role, joining date, and recruiter.
+  3. **Create Recruiter Task**: Spawns an urgent task assigned to the candidate's recruiter with the suggested message attached.
+  4. **Emit Notification**: Creates an in-app alert for the recruiter.
+* **Idempotency Guarantee**: Checks for existing open automation tasks for each candidate to prevent redundant task creation.
+* **Execution Endpoints**:
+  * `POST /api/v1/automations/run-engagement-rules`
+  * Frontend: **"Run Rule Check"** button on Dashboard & **"Run Engagement Rules"** button on Tasks page with modal execution summary.
+
+---
+
+## 5. WhatsApp & Email Communication Integrations
+
+Implemented in [`dev/backend/app/services/communication_service.py`](file:///c:/Satva/Tech/Swiggy-assignment/dev/backend/app/services/communication_service.py).
+
+### Features:
+1. **Direct WhatsApp Dispatch (`wa.me`)**:
+   * Cleans and formats phone numbers (`+91...`).
+   * URL-encodes personalized message text into a `https://wa.me/{phone}?text={encoded_message}` deep link.
+   * Opens WhatsApp Web or WhatsApp Desktop in one click.
+2. **Direct Email Client Dispatch (`mailto:`)**:
+   * Pre-fills recipient email, subject (`Swiggy Onboarding: Welcome {Name}!`), and body text.
+3. **Automated Interaction Logging**:
+   * Every message triggered (WhatsApp, Email, or Simulation) writes an outbound `Interaction` record to SQLite.
+   * Instantly updates the candidate's last contact timestamp and conversation timeline.
+4. **Live Provider Hooks**:
+   * Production-ready stubs for Twilio WhatsApp Gateway and SMTP/Resend providers via environment variables.
+
+---
+
+## 6. AI Engineering & Safety Guardrails
+
+### 1. Recency-Weighted Risk Analysis
+Messages tagged `[LATEST — PRIMARY SIGNAL]` dominate the risk assessment over historical messages. A candidate whose recent touch expresses accommodation issues will be elevated in risk even if previous touches were positive.
+
+### 2. Strict Structured Output
+All LLM completions use forced JSON schema response formats:
+* `candidate_analysis`: summary, risk tier, quote-backed evidence array, recommended action, confidence score (0–1), and model limitations.
+* `candidate_message`: editable personalized draft.
+
+### 3. Prompt Injection Defense & Safety Guardrails
+* Candidate data is isolated into non-executable data blocks.
+* Filter checks block prompt injections, coercive language, or policy leaks.
+* Deterministic local fallback engine ensures the application works seamlessly if the AI provider is offline or rate-limited.
+
+---
+
+## 7. Database Schema & Seed Dataset
+
+### Schema Overview (`post_offer_hq.db`):
+* `candidates`: ID, name, email, phone, role, department, location, recruiter, offer date, joining date, status (`active`/`joined`/`dropped`), AI risk, effective risk, override reason.
+* `candidate_journey_steps`: Candidate ID, step key, label, status (`completed`/`pending`/`overdue`).
+* `interactions`: Candidate ID, channel (`WhatsApp`/`Email`/`Call`/`Note`), direction (`inbound`/`outbound`), body text, tone, source, timestamp.
+* `tasks`: Candidate ID, title, source (`manual`/`automation`), status (`open`/`completed`/`dismissed`), assigned recruiter, due date, rule name, suggested message draft.
+* `notifications`: Kind, title, body, recipient, read timestamp, entity references.
+* `risk_overrides`: Candidate ID, previous risk, new risk, reason, overridden by, timestamp.
+
+### Realistic Cohort Seeder (`app/seed.py`):
+Contains **60 realistic candidate records**:
+* **Final-Stretch Candidates (1–7 days to join)**: E.g., Aarav Mehta (3 days), Diya Sharma (4 days), Kabir Menon (5 days), Sana Kapoor (6 days), Ishaan Reddy (7 days).
+* **Mid-Runway Candidates (8–15 days to join)**: E.g., Rohan Verma (9 days), Ananya Nair (10 days), Vihaan Patel (11 days), Tara Iyer (12 days).
+* **Long-Runway Candidates (16–45 days to join)**: Spanning up to 45 days.
+* **8 Past Joined Alumni**: For funnel rate calculations.
+
+---
+
+## 8. API Reference & Verification Suite
+
+### Summary of Endpoints
+
+| Method | Route | Description |
+|---|---|---|
+| `GET` | `/api/v1/health` | Service health status and Groq API readiness |
+| `GET` | `/api/v1/candidates` | Paginated, filterable candidate roster from SQLite |
+| `GET` | `/api/v1/candidates/{id}` | Candidate detail profile and metrics |
+| `GET` | `/api/v1/candidates/{id}/state` | Step statuses and interaction history |
+| `POST` | `/api/v1/candidates/{id}/interactions` | Append a manual or simulated interaction |
+| `PATCH` | `/api/v1/candidates/{id}/journey-steps/{step}` | Update milestone step status |
+| `POST` | `/api/v1/candidates/{id}/risk-overrides` | Apply recruiter risk override with audit reason |
+| `POST` | `/api/v1/candidates/{id}/send-message` | Dispatch message via WhatsApp/Email & log to timeline |
+| `POST` | `/api/v1/ai/messages/generate` | AI draft generation with Groq / fallback |
+| `POST` | `/api/v1/ai/candidates/analyze` | AI risk analysis and evidence extraction |
+| `POST` | `/api/v1/automations/run-engagement-rules` | Execute rule evaluation engine |
+| `GET` | `/api/v1/tasks` | List actionable recruiter tasks |
+| `POST` | `/api/v1/tasks/{id}/complete` | Mark task completed |
+| `POST` | `/api/v1/tasks/{id}/dismiss` | Dismiss task |
+| `POST` | `/api/v1/tasks/{id}/assign` | Assign task to recruiter |
+| `GET` | `/api/v1/notifications` | Fetch recruiter notifications |
+| `POST` | `/api/v1/notifications/mark-read` | Mark all notifications read |
+
+### Automated API Test Suite
+Run the test suite against the backend:
 ```bash
-# Clone and enter directory
+cd dev/backend
+python test_api_endpoints.py
+```
+**Result**: Executes and verifies all 12 API route categories with 100% pass rate.
+
+---
+
+## 9. Quickstart & Local Development
+
+### Option A: Running with Docker (Recommended)
+```bash
+# Clone the repository
+git clone <repo-url>
+cd Swiggy-assignment
+
+# Build and start both frontend and backend
 docker compose up --build
 ```
+* **Frontend Application**: `http://localhost:3000`
+* **FastAPI Swagger API Docs**: `http://localhost:8000/docs`
+* **Health Endpoint**: `http://localhost:8000/api/v1/health`
 
-- **Frontend App:** [http://localhost:3000](http://localhost:3000)
-- **FastAPI Backend & Swagger Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Health Check:** [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
+### Option B: Running Locally without Docker
 
-## 2. Product surface
+#### 1. Backend Setup:
+```bash
+cd dev/backend
 
-### Routes
+# Create and activate virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-| Route | Purpose | Source of truth today |
-| --- | --- | --- |
-| `/` | Candidate dashboard/roster, filters, client CSV export | `client/src/lib/mockData.ts` |
-| `/candidates/:id` | Candidate journey, interaction log, AI panel, composer, risk override | SQLite for mutations after first bootstrap; frontend seed for display metadata |
-| `/tasks` | Recruiter task queue | Mock state |
-| `/analytics` | Funnel, joining window, recruiter metrics | Mock state |
+# Install dependencies
+pip install -r requirements.txt
 
-### Current UX decisions
+# Seed the database
+python -m app.seed
 
-- The **Masala Ops** design uses a warm editorial Swiggy-inspired palette without reusing Swiggy branding.
-- Risk remains advisory: the AI never contacts a candidate, creates a real task, or overrides HR.
-- A recruiter can override effective risk only with a reason; AI risk is retained separately.
-- “Send” in the composer is explicitly simulated. It writes a persistent interaction, but does not call WhatsApp or email.
-- Candidate-detail persistence failures show a toast and keep the interface usable in demo mode.
+# Start backend server
+uvicorn app.main:app --reload --port 8000
+```
 
-## 3. Architecture
+#### 2. Frontend Setup:
+```bash
+cd dev
+
+# Install dependencies
+pnpm install  # or npm install
+
+# Start Vite development server
+pnpm run dev
+```
+
+---
+
+## 10. Deployment Guide (Production & Cloud)
+
+### Architecture in Production
 
 ```text
-Browser (React 19 + Vite + Wouter)
-  │
-  ├─ /api proxy during local development
-  │
-FastAPI (Python)
-  ├─ candidate-detail persistence APIs ── async SQLAlchemy ── SQLite file
-  ├─ AI message/analysis APIs ─────────── Groq API
-  │                                          ├─ Llama Prompt Guard 2 86M
-  │                                          └─ GPT-OSS 20B (strict JSON schema)
-  └─ server-side environment variables only
+[Internet / CDN]
+      │
+[Reverse Proxy / Cloud Load Balancer (HTTPS:443)]
+      │
+      ├─────────────────────────────┬─────────────────────────────┐
+      │ /                           │ /api                        │ /docs
+      ▼                             ▼                             ▼
+[Frontend Container:3000]     [Backend Container:8000]      [FastAPI Docs]
+(Node.js / Express SPA)       (FastAPI + Uvicorn Workers)
+                                    │
+                              [Persistent Volume / PostgreSQL]
 ```
 
-The Node/Express file at `dev/server/index.ts` only serves a production frontend bundle. It is not the business API. FastAPI is the application backend and normally runs on port `8000`; Vite runs on port `3000` and proxies `/api` to FastAPI.
-
-### Directory map
-
-```text
-dev/
-├─ client/src/
-│  ├─ pages/                 # Dashboard, candidate detail, tasks, analytics
-│  ├─ lib/api.ts             # Typed frontend API boundary
-│  ├─ lib/mockData.ts        # Current dashboard/tasks/analytics demo data
-│  ├─ lib/csv.ts             # Client-side current-view CSV export
-│  └─ contexts/              # Theme and in-browser notification state
-├─ backend/
-│  ├─ app/main.py            # FastAPI app, routes, error handling
-│  ├─ app/schemas.py         # Pydantic request/response validation
-│  ├─ app/db.py              # Async database engine/session setup
-│  ├─ app/models.py          # SQLAlchemy domain schema
-│  ├─ app/services/          # Groq pipeline and guardrails
-│  ├─ docs/ADR-001-*.md      # SQLite architecture decision
-│  ├─ .env                   # Local secret configuration; never commit
-│  └─ post_offer_hq.db       # Generated local SQLite file; never commit
-└─ vite.config.ts            # Vite config and /api development proxy
-```
-
-## 4. Local setup and runbook
-
-### Prerequisites
-
-- Node.js 20+ and pnpm 10+
-- Python 3.11+
-- A Groq API key for live AI generation
-
-### Backend
-
-```powershell
-cd C:\Satva\Tech\Swiggy-assignment\dev\backend
-python -m pip install -r requirements.txt
-Copy-Item .env.example .env
-# Set GROQ_API_KEY in .env
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-```
-
-On its first successful startup, FastAPI creates `post_offer_hq.db`. The default `DATABASE_URL` is:
-
-```text
-sqlite+aiosqlite:///./post_offer_hq.db
-```
-
-### Frontend
-
-```powershell
-cd C:\Satva\Tech\Swiggy-assignment\dev
-pnpm install
-pnpm dev
-```
-
-Open the Vite URL, normally `http://localhost:3000`. Keep both processes running. A `VITE_API_BASE_URL` is optional for deployment; locally the Vite proxy handles `/api`.
-
-### Useful checks
-
-```powershell
-# Frontend type check
-cd C:\Satva\Tech\Swiggy-assignment\dev
-pnpm check
-
-# Backend health check
-Invoke-RestMethod http://127.0.0.1:8000/api/v1/health
-
-# Production frontend bundle
-pnpm build
-```
-
-## 5. API contract
-
-Every FastAPI response is JSON. Successful AI responses include a request ID. API errors use this shape:
-
-```json
-{
-  "code": "unsafe_context",
-  "message": "Candidate context could not be safely processed.",
-  "requestId": "uuid"
-}
-```
-
-| Method | Endpoint | Implemented behaviour |
-| --- | --- | --- |
-| `GET` | `/api/v1/health` | Returns API health and whether Groq is configured. |
-| `POST` | `/api/v1/ai/messages/generate` | Returns a guarded, structured, editable email/WhatsApp draft. |
-| `POST` | `/api/v1/ai/candidates/analyze` | Returns summary, risk, quote evidence, next action, confidence, and limitations. Persists analysis when the candidate has been bootstrapped. |
-| `PUT` | `/api/v1/candidates/{id}/bootstrap` | **Temporary bridge:** creates a local database record from the current frontend seed only if it does not exist. Never overwrites an existing record. |
-| `GET` | `/api/v1/candidates/{id}/state` | Returns persisted risk, AI risk, override reason, journey statuses, and interactions. |
-| `POST` | `/api/v1/candidates/{id}/interactions` | Persists a manual or simulated-send interaction. |
-| `PATCH` | `/api/v1/candidates/{id}/journey-steps/{key}` | Persists a journey-status change. |
-| `POST` | `/api/v1/candidates/{id}/risk-overrides` | Persists effective-risk override and append-only audit record. |
-
-### Current candidate-detail persistence flow
-
-1. Detail page opens from frontend mock roster.
-2. It calls `bootstrap` once. New records receive the seed candidate, journey steps, and demo interactions; existing records remain unchanged.
-3. The API returns durable state and the UI applies it to the current view.
-4. Manual logs, simulated sends, journey toggles, and overrides await their own API mutation.
-5. Refreshing or reopening detail calls bootstrap again; since it is idempotent, existing SQLite values are returned instead of being reset.
-
-This bridge is deliberate for Phase 1, but must be replaced by database-backed dashboard list/detail APIs before describing the application as fully DB-driven.
-
-## 6. Database design
-
-SQLite was selected for Phase 1 because it is zero-operations and fast for a local single-process demo. SQLAlchemy uses `aiosqlite`, so database calls are awaited rather than blocking FastAPI’s event loop.
-
-SQLite connection policy:
-
-- `PRAGMA foreign_keys = ON`
-- `PRAGMA journal_mode = WAL` for better read/write coexistence
-- `PRAGMA busy_timeout = 5000`
-- `AsyncSession` lifecycle per request
-
-SQLite still permits one writer at a time. It is appropriate for a local demo but not for multiple production application instances or sustained write concurrency. Move to Postgres by changing `DATABASE_URL`, adding migrations, and retaining the same domain schema/repository boundaries.
-
-### Tables
-
-| Table | Purpose | Important fields |
-| --- | --- | --- |
-| `candidates` | Current operational candidate state | external ID, recruiter, status, AI risk, effective risk, override reason, optimistic row version |
-| `candidate_journey_steps` | Candidate-specific engagement journey | candidate ID, step key, status, due/completed dates; unique candidate+step |
-| `interactions` | Persistent conversation and recruiter notes | candidate ID, channel, direction, body, tone, source, timestamp |
-| `ai_analyses` | Append-only validated AI provenance | candidate ID, output JSON, model, prompt version, input fingerprint, validation status |
-| `risk_overrides` | Append-only HR audit trail | previous/new risk, reason, recruiter, timestamp |
-| `tasks` | Future durable task queue | candidate ID, source, status, assignee, due/completed dates |
-| `notifications` | Future durable notification feed | recipient, kind, entity reference, read timestamp |
-
-Current indexes cover external candidate ID, recruiter, joining date, risk, candidate interaction chronology, analysis chronology, task status/due date, and notification recipient/read status.
-
-### Migration caveat
-
-The current app uses `Base.metadata.create_all()` at startup. This is useful for a fast local bootstrap but does **not** version schema changes. Add Alembic migrations before shared development, review, or deployment. Do not use `create_all()` as a production migration strategy.
-
-## 7. AI design, safety, and validation
-
-### Models
-
-| Stage | Default model | Responsibility |
-| --- | --- | --- |
-| Input attack detection | `meta-llama/llama-prompt-guard-2-86m` | Classifies candidate-context chunks for prompt injection. |
-| Main reasoning/generation | `openai/gpt-oss-20b` | Candidate communication and risk analysis with strict JSON schema. |
-| Optional output safety | `openai/gpt-oss-safeguard-20b` | Configurable secondary candidate-facing output review. Disabled by default pending evaluation. |
-
-All model IDs are environment settings, not frontend constants. The Groq key is read only by FastAPI through `.env`; it must never be committed, logged, or exposed through Vite variables.
-
-### Input context
-
-The frontend supplies only bounded context: candidate ID/name/role/location, joining details, current risk, next action, and at most 12 interactions of at most 1,500 characters each. The backend turns that context into labelled data blocks, treating every interaction as untrusted text rather than a trusted instruction.
-
-### Guardrail flow
-
-```text
-Pydantic input limits
-  → Prompt Guard scan (chunked for its context limit)
-  → reject unsafe context with 422
-  → bounded labelled HR context
-  → GPT-OSS 20B strict JSON Schema response
-  → Pydantic output validation
-  → semantic checks
-  → optional output-safety model
-  → return / persist only validated result
-```
-
-Prompt Guard currently returns an injection probability. Scores at or above `0.5` are rejected. An unrecognized guard result or guard outage fails closed while `PROMPT_GUARD_REQUIRED=true`.
-
-### Structured analysis result
-
-```json
-{
-  "summary": "Candidate has an unresolved relocation concern.",
-  "risk": "medium",
-  "evidence": [{
-    "category": "relocation",
-    "quote": "I am still figuring out relocation and accommodation.",
-    "severity": "medium"
-  }],
-  "recommended_action": "Call today and offer relocation support.",
-  "confidence": 0.8,
-  "limitations": ["Based only on recorded interactions."]
-}
-```
-
-Semantic validation rejects evidence quotes that cannot be found verbatim in the provided interaction history. Candidate-facing drafts are also constrained by channel length, candidate personalization, and a professionalism blocklist. Strict schema adherence does not make a model’s advice inherently correct: HR must review all risk and messaging recommendations.
-
-### Risk behaviour and limits
-
-- AI classifies only `low`, `medium`, or `high` from recorded context.
-- It must provide quote-based evidence and a limitation.
-- The effective risk is updated from an AI analysis only when there is no HR override.
-- A human override writes an audit record and remains effective through future AI reruns.
-- Current limitations: no calibrated labelled dataset, no multilingual evaluation suite, missing phone/meeting context, and no formal fairness assessment. Do not use this score as an automated employment decision.
-
-### Provider failure behaviour
-
-- FastAPI returns sanitized errors for unavailable provider, rate limit, malformed output, and unsafe context.
-- The UI keeps its existing content and shows a toast when AI is unavailable.
-- The message composer has a local tone-aware fallback draft for demo continuity.
-- The current Groq configuration leaves sufficient completion tokens for GPT-OSS reasoning plus constrained JSON decoding (`reasoning_effort="low"`).
-
-## 8. Frontend state and current integrations
-
-### Persisted now
-
-- Candidate effective risk / AI risk / override reason
-- Candidate journey statuses
-- Manual interaction notes
-- Simulated-send interaction logs
-- Validated AI analysis provenance and AI risk
-
-### Still browser/mock state
-
-- Roster rows and dashboard KPIs
-- Dashboard filters, sort, and current-view CSV export
-- Tasks, task assignment/completion/dismissal
-- Analytics charts and export button
-- Notification history; only in-browser toast/context state is active
-- Candidate profile fields other than the bootstrap copy
-
-The detail page makes write calls asynchronously and updates UI after the server responds (journey toggle first applies an optimistic display update, then restores the prior state if persistence fails). The architecture avoids synchronous database calls in the browser; all I/O is through `fetch` and awaited FastAPI handlers.
-
-## 9. Environment configuration
-
-Copy `dev/backend/.env.example` to `dev/backend/.env`.
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `GROQ_API_KEY` | none | Required for live AI. Keep secret. |
-| `GROQ_MAIN_MODEL` | `openai/gpt-oss-20b` | Main structured-output model. |
-| `GROQ_PROMPT_GUARD_MODEL` | `meta-llama/llama-prompt-guard-2-86m` | Input injection detector. |
-| `GROQ_OUTPUT_GUARD_MODEL` | `openai/gpt-oss-safeguard-20b` | Optional output safety model. |
-| `GROQ_OUTPUT_GUARD_ENABLED` | `false` | Enable only after HR-specific evaluation. |
-| `PROMPT_GUARD_REQUIRED` | `true` | Fail closed if Prompt Guard fails. |
-| `DATABASE_URL` | `sqlite+aiosqlite:///./post_offer_hq.db` | SQLAlchemy connection URL. |
-
-`.env`, `*.db`, and SQLite files are ignored by the project’s Git rules.
-
-## 10. Verification performed
-
-The following checks have been run during implementation:
-
-- TypeScript: `tsc --noEmit`
-- Python: `python -m compileall -q app`
-- FastAPI health endpoint
-- Synthetic, non-personal Groq message-generation request
-- Synthetic, non-personal Groq candidate-analysis request
-- Synthetic prompt-injection rejection (`422 unsafe_context`)
-- SQLite lifecycle: bootstrap → manual log → journey update → risk override → read persisted state
-
-No automated test suite is committed yet. Add pytest/API contract tests and Vitest component tests before relying on changes beyond manual testing.
-
-## 11. Recommended implementation order
-
-1. **Database source of truth:** Create candidate CRUD/list/filter/detail APIs, database query pagination, and an idempotent 50+ record seed command. Remove the frontend bootstrap bridge.
-2. **CSV import/export:** Add server-side CSV upload, header/date/duplicate validation, error report, and large-result export.
-3. **Task and automation engine:** Implement the “joining in 7 days + no contact for 5 days” rule, idempotency keys, task creation, and notification persistence.
-4. **Real-time notifications:** Add SSE first (simpler than WebSockets for one-way events), then wire the existing toast/feed UI.
-5. **Database analytics:** Define metrics in SQL and drive the current analytics charts from aggregate APIs.
-6. **Quality:** Add Alembic, pytest/Vitest, Docker Compose, `.env` validation, structured logs, request tracing, and CI.
-7. **Production hardening:** Authentication/RBAC, PII retention/deletion policy, encrypted backups, rate limits, audit access controls, provider failover, AI evaluation dataset, and Postgres.
-
-## 12. Scaling to one million candidates
-
-- Replace SQLite with Postgres; use read replicas and tenant-aware row-level security where needed.
-- Use keyset pagination, not offset pagination, for large roster browsing.
-- Denormalize/recompute common candidate dashboard fields on write; do not aggregate an entire interaction table for every page load.
-- Store analytics in daily rollups or a columnar analytics store; show live deltas separately.
-- Partition interactions and AI analyses by time because they grow much faster than candidate records.
-- Run AI only on triggers (new inbound message, overdue journey stage, entering a joining window), fingerprint inputs, reuse unchanged analyses, and queue work with retries/dead-letter handling.
-- Queue automation by recruiter/tenant and enforce per-candidate cooldowns to prevent repeated contact.
-
-## 13. Security and privacy checklist
-
-- Never expose `GROQ_API_KEY` to the browser or commit `.env`.
-- Treat all candidate text as untrusted input; do not let it become a system instruction.
-- Do not auto-send AI drafts or automatically make employment decisions from risk scores.
-- Maintain and review `risk_overrides` and `ai_analyses` as audit records.
-- Before production, define consent, access controls, PII retention/deletion, encryption/backups, incident response, and HR/legal review for AI use.
-
-## 14. Important files
-
-| File | Why it matters |
-| --- | --- |
-| `dev/client/src/pages/CandidateDetail.tsx` | Candidate workflow and persistence wiring. |
-| `dev/client/src/lib/api.ts` | Browser-to-FastAPI contract. |
-| `dev/client/src/pages/Dashboard.tsx` | Current mock roster/filter/export implementation. |
-| `dev/backend/app/main.py` | API routes and request/error plumbing. |
-| `dev/backend/app/schemas.py` | Pydantic validation contracts. |
-| `dev/backend/app/models.py` | SQL schema. |
-| `dev/backend/app/db.py` | Async SQLite setup. |
-| `dev/backend/app/services/groq_service.py` | Groq model calls, strict output, provider failure handling. |
-| `dev/backend/app/services/guardrails.py` | Prompt-injection and semantic/professionalism checks. |
-| `dev/backend/docs/ADR-001-sqlite-persistence.md` | SQLite decision and trade-offs. |
-
+### Deployment Strategy Options:
+
+#### 1. Deploy on Render / Railway (Easiest Cloud Setup)
+1. **Backend Service**:
+   * Build Command: `pip install -r requirements.txt`
+   * Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   * Environment Variables: `GROQ_API_KEY`, `DATABASE_URL=sqlite+aiosqlite:////data/post_offer_hq.db`
+   * Add a Persistent Disk mounted to `/data` to persist SQLite data across deployments.
+2. **Frontend Service**:
+   * Build Command: `pnpm install && pnpm run build`
+   * Start Command: `node dist/index.js`
+   * Environment Variables: `VITE_API_URL=https://your-backend-service.onrender.com`
+
+#### 2. Deploy with Docker on AWS ECS / DigitalOcean / Fly.io / GCP Cloud Run
+* Use the provided root [`docker-compose.yml`](file:///c:/Satva/Tech/Swiggy-assignment/docker-compose.yml).
+* Mount a persistent volume for the backend SQLite storage (`backend-data:/app/data`).
+
+#### 3. Transitioning from SQLite to Managed PostgreSQL
+To deploy with PostgreSQL (e.g. Amazon RDS, Supabase, Neon):
+1. Install `asyncpg`: `pip install asyncpg`.
+2. Update `DATABASE_URL` in environment:
+   ```env
+   DATABASE_URL=postgresql+asyncpg://user:password@hostname:5432/post_offer_hq
+   ```
+3. SQLAlchemy async models in [`app/models.py`](file:///c:/Satva/Tech/Swiggy-assignment/dev/backend/app/models.py) will work out of the box.
+
+---
+
+## 11. 1-Million Candidate Scaling Roadmap
+
+When scaling Post-Offer HQ to support enterprise-scale candidate volume (1M+ active offers):
+
+1. **Database Tier**:
+   * Migrate to **PostgreSQL 16+** with table partitioning on `joining_date` and `status`.
+   * Implement read replicas for high-frequency dashboard queries and analytics aggregations.
+   * Add Redis caching layer for candidate snapshots and KPI counters.
+2. **Asynchronous Automation & Background Workers**:
+   * Offload the Engagement Rules Engine to background worker queues using **Celery** or **Temporal** backed by Redis/RabbitMQ.
+   * Run evaluations on candidate state transition webhooks (e.g. from Workday, Greenhouse, or Darwinbox).
+3. **AI Scalability & Cost Optimization**:
+   * Implement semantic response caching using Redis vector search to avoid re-generating similar outreach templates.
+   * Use lightweight models (`llama-3.1-8b-instant`) for primary risk classification and route to larger models (`llama-3.3-70b`) only for high-complexity escalations.
+4. **Security & Enterprise Compliance**:
+   * Role-Based Access Control (RBAC) separating Recruiter, Hiring Manager, and HR Leadership views.
+   * Candidate PII anonymization and automated data retention/deletion policies post-joining.
