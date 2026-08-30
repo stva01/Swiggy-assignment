@@ -1,0 +1,243 @@
+/* Masala Ops visual system: warm paper surfaces, cocoa ink, delivery-orange signals, editorial spacing. */
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+}
+
+:root {
+  --primary: oklch(0.61 0.19 40);
+  --primary-foreground: oklch(0.99 0.01 90);
+  --background: oklch(0.965 0.018 82);
+  --foreground: oklch(0.27 0.04 45);
+  --card: oklch(0.99 0.008 88);
+  --card-foreground: oklch(0.27 0.04 45);
+  --popover: oklch(0.99 0.008 88);
+  --popover-foreground: oklch(0.27 0.04 45);
+  --secondary: oklch(0.925 0.03 82);
+  --secondary-foreground: oklch(0.36 0.045 47);
+  --muted: oklch(0.94 0.02 83);
+  --muted-foreground: oklch(0.56 0.045 47);
+  --accent: oklch(0.86 0.08 67);
+  --accent-foreground: oklch(0.32 0.05 44);
+  --destructive: oklch(0.6 0.19 28);
+  --destructive-foreground: oklch(0.99 0.01 90);
+  --border: oklch(0.84 0.035 77);
+  --input: oklch(0.88 0.03 78);
+  --ring: oklch(0.61 0.19 40);
+  --chart-1: oklch(0.61 0.19 40);
+  --chart-2: oklch(0.62 0.12 143);
+  --chart-3: oklch(0.76 0.14 83);
+  --chart-4: oklch(0.66 0.12 22);
+  --chart-5: oklch(0.5 0.07 47);
+  --radius: 0.85rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Manrope", sans-serif;
+    min-width: 320px;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [type="button"]:not(:disabled),
+  [type="submit"]:not(:disabled),
+  [type="reset"]:not(:disabled),
+  a[href],
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled) {
+    @apply cursor-pointer;
+  }
+
+  ::selection {
+    background: #f5a074;
+    color: #3c251d;
+  }
+}
+
+@layer components {
+  .container {
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1.15rem;
+    padding-right: 1.15rem;
+  }
+
+  .flex {
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .paper-grid {
+    background-image: linear-gradient(rgba(94, 60, 42, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(94, 60, 42, 0.035) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .paper-grain {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .paper-grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    opacity: 0.24;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.1'/%3E%3C/svg%3E");
+    mix-blend-mode: multiply;
+  }
+
+  .display-face {
+    font-family: "DM Serif Display", serif;
+    letter-spacing: -0.04em;
+  }
+
+  .shadow-soft {
+    box-shadow: 0 18px 50px rgba(89, 50, 32, 0.08), 0 3px 10px rgba(89, 50, 32, 0.05);
+  }
+
+  .shadow-lift {
+    box-shadow: 0 18px 38px rgba(245, 106, 42, 0.16), 0 5px 14px rgba(89, 50, 32, 0.08);
+  }
+
+  .orange-rule {
+    position: relative;
+  }
+
+  .orange-rule::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: -10px;
+    width: 36px;
+    height: 3px;
+    background: #f56a2a;
+    border-radius: 999px;
+  }
+
+  .focus-ring:focus-visible {
+    outline: 3px solid rgba(245, 106, 42, 0.35);
+    outline-offset: 3px;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  @media (min-width: 640px) {
+    .container {
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .container {
+      padding-left: 2.25rem;
+      padding-right: 2.25rem;
+      max-width: 1440px;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .reveal-up {
+    animation: reveal-up 520ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+
+  .reveal-up-delay-1 { animation-delay: 45ms; }
+  .reveal-up-delay-2 { animation-delay: 90ms; }
+  .reveal-up-delay-3 { animation-delay: 135ms; }
+  .reveal-up-delay-4 { animation-delay: 180ms; }
+
+  .pressable {
+    transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms ease, background-color 160ms ease;
+  }
+
+  .pressable:active {
+    transform: scale(0.97);
+  }
+
+  .route-fill {
+    animation: route-fill 860ms cubic-bezier(0.23, 1, 0.32, 1) both;
+    transform-origin: left center;
+  }
+}
+
+@keyframes reveal-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes route-fill {
+  from { transform: scaleX(0.1); opacity: 0.2; }
+  to { transform: scaleX(1); opacity: 1; }
+}
+
+@media (min-width: 1024px) {
+  .app-rail {
+    width: 245px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .app-rail {
+    width: 76px;
+  }
+}
+
+@media (max-width: 767px) {
+  .app-rail {
+    width: 100%;
+    height: auto;
+  }
+}
