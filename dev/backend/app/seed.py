@@ -173,21 +173,88 @@ async def seed(force_refresh: bool = True) -> int:
                 ),
             ])
 
-            # Seed task if high risk or final stretch
-            if item["risk"] == RiskLevel.high:
+            created += 1
+
+        # Seed realistic task distribution across Overdue, Today, and Upcoming
+        candidate_map = {c.external_id: c for c in (await session.scalars(select(Candidate))).all()}
+        
+        task_specs = [
+            # 1. Overdue Tasks (Action needed now)
+            {
+                "cand_id": "cand-001",
+                "title": "Urgent call: Resolve transit accommodation blocker before Day 1",
+                "source": "automation",
+                "rule_name": "Final-Stretch Silence Escalation",
+                "due_at": datetime.utcnow() - timedelta(days=1),
+                "msg": "Hi Aarav, reaching out regarding your transit accommodation in Bengaluru. I'll call you shortly to make sure everything is sorted for your joining on 2nd Sep.",
+            },
+            {
+                "cand_id": "cand-010",
+                "title": "Follow up on dependent health insurance enrollment",
+                "source": "automation",
+                "rule_name": "Milestone Document Checklist",
+                "due_at": datetime.utcnow() - timedelta(days=2),
+                "msg": "Hi Tara, checking in on the health insurance forms for your dependents. Let me know if you need any clarification on the benefits package.",
+            },
+            # 2. Today Tasks (Actions for today)
+            {
+                "cand_id": "cand-002",
+                "title": "Confirm background verification clearance with HR Ops",
+                "source": "manual",
+                "rule_name": "Readiness Review",
+                "due_at": datetime.utcnow(),
+                "msg": "Hi Diya, your background verification documents are cleared! Excited to have you on board as Senior Frontend Engineer this week.",
+            },
+            {
+                "cand_id": "cand-004",
+                "title": "Align notice period release letter & joining day schedule",
+                "source": "automation",
+                "rule_name": "Final-Stretch Silence Escalation",
+                "due_at": datetime.utcnow(),
+                "msg": "Hi Sana, with your joining coming up on 5th Sep, wanted to connect on your notice period release letter. Let's align today.",
+            },
+            # 3. Upcoming Tasks (Runway checks)
+            {
+                "cand_id": "cand-003",
+                "title": "IT desk check: Confirm MacBook Pro courier dispatch",
+                "source": "manual",
+                "rule_name": "Asset Provisioning",
+                "due_at": datetime.utcnow() + timedelta(days=1),
+                "msg": "Hi Kabir, your laptop has been provisioned and is out for delivery. Tracking details have been sent to your email!",
+            },
+            {
+                "cand_id": "cand-005",
+                "title": "Send Mumbai hub Day-1 welcome schedule and buddy intro",
+                "source": "manual",
+                "rule_name": "Orientation Prep",
+                "due_at": datetime.utcnow() + timedelta(days=2),
+                "msg": "Hi Ishaan, here is the orientation schedule for Monday at our Mumbai hub. Your onboarding buddy Rahul is eager to welcome you.",
+            },
+            {
+                "cand_id": "cand-007",
+                "title": "Send engineering architecture reading kit and manager intro",
+                "source": "manual",
+                "rule_name": "Pre-boarding Welcome",
+                "due_at": datetime.utcnow() + timedelta(days=3),
+                "msg": "Hi Rohan, sharing the tech stack orientation guide before your start on the 8th. Feel free to browse through!",
+            },
+        ]
+
+        for spec in task_specs:
+            cand = candidate_map.get(spec["cand_id"])
+            if cand:
                 session.add(
                     Task(
-                        candidate_id=candidate.id,
-                        title=f"Call {item['name']} regarding joining concerns",
-                        source="automation",
+                        candidate_id=cand.id,
+                        title=spec["title"],
+                        source=spec["source"],
                         status=TaskStatus.open,
-                        assigned_to=item["recruiter"],
-                        due_at=datetime.utcnow() + timedelta(days=1),
-                        rule_name="Final-Stretch Silence Escalation",
-                        suggested_message=f"Hi {item['name'].split()[0]}, with your joining date just {item['days_to_join']} days away ({joining_date.strftime('%d %b')}), I wanted to personally connect to assist with any pending steps.",
+                        assigned_to=cand.recruiter,
+                        due_at=spec["due_at"],
+                        rule_name=spec.get("rule_name"),
+                        suggested_message=spec["msg"],
                     )
                 )
-            created += 1
 
         # 3. Seed 8 Past Joined Candidates for accurate funnel/analytics
         for j in range(8):
