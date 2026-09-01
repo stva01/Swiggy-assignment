@@ -1,4 +1,42 @@
 /* Logic layer API boundary: the browser never talks to Groq directly; FastAPI owns provider credentials and orchestration. */
+
+/**
+ * Retry helper with exponential backoff for API calls.
+ * Handles cold-start delays when backend is spinning up on Render.
+ * @param fn Async function to retry
+ * @param maxRetries Number of retry attempts (default: 3)
+ * @param baseDelayMs Base delay in milliseconds (default: 1000)
+ * @returns Result of the function call
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelayMs: number = 1000
+): Promise<T> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Don't retry on client errors (4xx), only retry on server errors (5xx), timeouts, and network errors
+      if (error instanceof Error && error.message.includes("4")) {
+        throw error; // Don't retry 4xx responses
+      }
+
+      if (attempt < maxRetries - 1) {
+        // Exponential backoff: 1s, 2s, 4s
+        const delayMs = baseDelayMs * Math.pow(2, attempt) + Math.random() * 100;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  throw lastError || new Error("Request failed after retries");
+}
+
 export type MessageTone = "Friendly" | "Formal" | "Urgent";
 
 export type GenerateMessageRequest = {
@@ -49,47 +87,72 @@ const API_BASE_URL = (
 ).replace(/\/$/, "");
 
 export async function requestGeneratedMessage(payload: GenerateMessageRequest): Promise<GenerateMessageResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/ai/messages/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+  return retryWithBackoff(async () => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/ai/messages/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`AI generation failed with ${response.status}`);
+    return response.json() as Promise<GenerateMessageResponse>;
   });
-  if (!response.ok) throw new Error(`AI generation failed with ${response.status}`);
-  return response.json() as Promise<GenerateMessageResponse>;
 }
 
 export async function requestCandidateAnalysis(payload: CandidateAIContext): Promise<CandidateAnalysisResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/ai/candidates/analyze`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+  return retryWithBackoff(async () => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/ai/candidates/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`AI analysis failed with ${response.status}`);
+    return response.json() as Promise<CandidateAnalysisResponse>;
   });
-  if (!response.ok) throw new Error(`AI analysis failed with ${response.status}`);
-  return response.json() as Promise<CandidateAnalysisResponse>;
 }
 
 async function persistedRequest<T>(path: string, method: "POST" | "PUT" | "PATCH", body?: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
-  if (!response.ok) throw new Error(`Persistence request failed with ${response.status}`);
-  return response.json() as Promise<T>;
+  return retryWithBackoff(async () => {
+    const response = await fetch(`${API_BASE_URL}${path}`, { 
+      method, 
+      headers: { "Content-Type": "application/json" }, 
+      body: body ? JSON.stringify(body) : undefined 
+    });
+    if (!response.ok) throw new Error(`Persistence request failed with ${response.status}`);
+    return response.json() as Promise<T>;
+  });
 }
 
 export function bootstrapCandidate(payload: CandidateBootstrap) { return persistedRequest<CandidateState>(`/api/v1/candidates/${encodeURIComponent(payload.candidateId)}/bootstrap`, "PUT", payload); }
 export function createManualInteraction(candidateId: string, payload: { channel: string; text: string; tone?: string }) { return persistedRequest<PersistedInteraction>(`/api/v1/candidates/${encodeURIComponent(candidateId)}/interactions`, "POST", payload); }
 export function updateJourneyStep(candidateId: string, stepKey: string, status: "completed" | "pending" | "overdue") { return persistedRequest<CandidateState>(`/api/v1/candidates/${encodeURIComponent(candidateId)}/journey-steps/${encodeURIComponent(stepKey)}`, "PATCH", { status }); }
 export function createRiskOverride(candidateId: string, risk: "low" | "medium" | "high", reason: string, overriddenBy: string) { return persistedRequest<CandidateState>(`/api/v1/candidates/${encodeURIComponent(candidateId)}/risk-overrides`, "POST", { risk, reason, overriddenBy }); }
-export function fetchCandidateState(candidateId: string) { return fetch(`${API_BASE_URL}/api/v1/candidates/${encodeURIComponent(candidateId)}/state`).then(async (response) => { if (!response.ok) throw new Error(`Candidate state failed with ${response.status}`); return response.json() as Promise<CandidateState>; }); }
-export function fetchCandidateDetail(candidateId: string) { return fetch(`${API_BASE_URL}/api/v1/candidates/${encodeURIComponent(candidateId)}`).then(async (response) => { if (!response.ok) throw new Error(`Candidate detail failed with ${response.status}`); return response.json() as Promise<DashboardCandidate>; }); }
+export function fetchCandidateState(candidateId: string) { 
+  return retryWithBackoff(async () => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/candidates/${encodeURIComponent(candidateId)}/state`);
+    if (!response.ok) throw new Error(`Candidate state failed with ${response.status}`);
+    return response.json() as Promise<CandidateState>;
+  });
+}
+
+export function fetchCandidateDetail(candidateId: string) { 
+  return retryWithBackoff(async () => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/candidates/${encodeURIComponent(candidateId)}`);
+    if (!response.ok) throw new Error(`Candidate detail failed with ${response.status}`);
+    return response.json() as Promise<DashboardCandidate>;
+  });
+}
 
 export async function fetchCandidates(params: { search?: string; risk?: string; recruiter?: string; month?: string; page: number; pageSize: number; sort: "joining" | "risk" }): Promise<CandidatePage> {
-  const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize), sort: params.sort });
-  if (params.search) query.set("search", params.search);
-  if (params.risk && params.risk !== "all") query.set("risk", params.risk);
-  if (params.recruiter && params.recruiter !== "all") query.set("recruiter", params.recruiter);
-  if (params.month && params.month !== "all") query.set("month", params.month === "Aug" ? "8" : "9");
-  const response = await fetch(`${API_BASE_URL}/api/v1/candidates?${query}`);
-  if (!response.ok) throw new Error(`Candidate list failed with ${response.status}`);
-  return response.json() as Promise<CandidatePage>;
+  return retryWithBackoff(async () => {
+    const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize), sort: params.sort });
+    if (params.search) query.set("search", params.search);
+    if (params.risk && params.risk !== "all") query.set("risk", params.risk);
+    if (params.recruiter && params.recruiter !== "all") query.set("recruiter", params.recruiter);
+    if (params.month && params.month !== "all") query.set("month", params.month === "Aug" ? "8" : "9");
+    const response = await fetch(`${API_BASE_URL}/api/v1/candidates?${query}`);
+    if (!response.ok) throw new Error(`Candidate list failed with ${response.status}`);
+    return response.json() as Promise<CandidatePage>;
+  });
 }
 
 export type Task = {
@@ -149,9 +212,11 @@ export type ApiNotification = {
 };
 
 export async function fetchTasks(status: string = "open"): Promise<Task[]> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/tasks?status=${encodeURIComponent(status)}`);
-  if (!response.ok) throw new Error(`Tasks request failed with ${response.status}`);
-  return response.json() as Promise<Task[]>;
+  return retryWithBackoff(async () => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/tasks?status=${encodeURIComponent(status)}`);
+    if (!response.ok) throw new Error(`Tasks request failed with ${response.status}`);
+    return response.json() as Promise<Task[]>;
+  });
 }
 
 export async function completeTask(taskId: string): Promise<Task> {
@@ -163,24 +228,30 @@ export async function dismissTask(taskId: string): Promise<Task> {
 }
 
 export async function assignTask(taskId: string, assignee: string = "Nisha Rao"): Promise<Task> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/tasks/${encodeURIComponent(taskId)}/assign?assignee=${encodeURIComponent(assignee)}`, { method: "POST" });
-  if (!response.ok) throw new Error(`Assign task failed with ${response.status}`);
-  return response.json() as Promise<Task>;
+  return retryWithBackoff(async () => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/tasks/${encodeURIComponent(taskId)}/assign?assignee=${encodeURIComponent(assignee)}`, { method: "POST" });
+    if (!response.ok) throw new Error(`Assign task failed with ${response.status}`);
+    return response.json() as Promise<Task>;
+  });
 }
 
 export async function runEngagementRules(): Promise<EvaluateRulesResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/automations/run-engagement-rules`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+  return retryWithBackoff(async () => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/automations/run-engagement-rules`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!response.ok) throw new Error(`Engagement rule run failed with ${response.status}`);
+    return response.json() as Promise<EvaluateRulesResponse>;
   });
-  if (!response.ok) throw new Error(`Engagement rule run failed with ${response.status}`);
-  return response.json() as Promise<EvaluateRulesResponse>;
 }
 
 export async function fetchBackendNotifications(): Promise<ApiNotification[]> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/notifications`);
-  if (!response.ok) throw new Error(`Notifications failed with ${response.status}`);
-  return response.json() as Promise<ApiNotification[]>;
+  return retryWithBackoff(async () => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/notifications`);
+    if (!response.ok) throw new Error(`Notifications failed with ${response.status}`);
+    return response.json() as Promise<ApiNotification[]>;
+  });
 }
 
 export async function markBackendNotificationsRead(): Promise<void> {
@@ -223,9 +294,11 @@ export function createMailtoLink(email: string, subject: string, body: string): 
 }
 
 export async function requestHealth() {
-  const response = await fetch(`${API_BASE_URL}/api/v1/health`);
-  if (!response.ok) throw new Error(`Backend health check failed with ${response.status}`);
-  return response.json() as Promise<{ status: string }>;
+  return retryWithBackoff(async () => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/health`);
+    if (!response.ok) throw new Error(`Backend health check failed with ${response.status}`);
+    return response.json() as Promise<{ status: string }>;
+  });
 }
 
 
